@@ -238,6 +238,13 @@ def apply_docked_style(hwnd):
         else:
             logger.debug(f"Docked style applied successfully to hwnd {hwnd}")
 
+        # Force complete redraw to fix transparency and remove white bar artifacts
+        # InvalidateRect marks the entire window for redrawing
+        user32.InvalidateRect(hwnd, None, True)
+        # Force immediate redraw
+        user32.UpdateWindow(hwnd)
+        logger.debug(f"Forced window redraw for proper transparency rendering on hwnd {hwnd}")
+
     except Exception as FrameForceError:
         logger.error(f"Error forcing frame change for hwnd {hwnd}: {FrameForceError}", exc_info=True)
 
