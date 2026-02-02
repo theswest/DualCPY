@@ -293,7 +293,7 @@ class Launcher:
                         apply_docked_style(topScr)
                         self.dock.hwnd_top = topScr
 
-                    # Dock top screen if found and not already docked
+                    # Dock bottom screen if found and not already docked
                     if bottomScr and self.user32.GetParent(bottomScr) != self.hwnd_container:
                         self.user32.SetParent(bottomScr, self.hwnd_container)
                         apply_docked_style(bottomScr)
