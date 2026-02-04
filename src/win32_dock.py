@@ -241,7 +241,7 @@ def apply_docked_style(hwnd):
         # Force complete redraw to fix transparency and remove white bar artifacts
         # InvalidateRect marks the entire window for redrawing
         user32.InvalidateRect(hwnd, None, True)
-        # Force immediate redraw
+        # UpdateWindow forces immediate redraw
         user32.UpdateWindow(hwnd)
         logger.debug(f"Forced window redraw for proper transparency rendering on hwnd {hwnd}")
 
@@ -413,8 +413,6 @@ def set_foreground_with_attach(hwnd):
 
                 if not detach_success:
                     logger.critical("FAILED TO DETACH THREAD INPUT - SYSTEM MAY BE UNSTABLE")
-
-        return False
 
     except Exception as ForegroundAttachCriticalError:
         logger.error(f"Critical error in set_foreground_with_attach: {ForegroundAttachCriticalError}",

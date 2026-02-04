@@ -80,6 +80,7 @@ DEFAULT_LAYOUT = {"tx": TOP_SCREEN_DEFAULT_X, "ty": TOP_SCREEN_DEFAULT_Y,
                   "bx": BOTTOM_SCREEN_DEFAULT_X, "by": BOTTOM_SCREEN_DEFAULT_Y,
                   "global_scale": DEFAULT_GLOBAL_SCALE}
 
+
 class Launcher:
     """
     Main window controller for ThorCPY
@@ -88,6 +89,7 @@ class Launcher:
 
     The launcher makes a container window that holds 2 scrcpy instances and controls positioning
     """
+
     def __init__(self):
         """
         Sets up the launcher with default layouts and configurations
@@ -195,6 +197,7 @@ class Launcher:
         Handles both scrcpy windows as children
         Waits for scrcpy dimensions to be available before creating window.
         """
+
         def loop():
             # Wait for the window dimensions
             while self.scrcpy.f_w1 == 0:
@@ -241,7 +244,7 @@ class Launcher:
                 ctypes.byref(rect), style, False, WS_EX_CONTROLPARENT
             )
 
-             #Create the container window
+            # Create the container window
             hwnd = self.user32.CreateWindowExW(
                 WS_EX_CONTROLPARENT,
                 "ThorFinalBridge",
@@ -268,7 +271,7 @@ class Launcher:
             # Run the message loop for the container window
             msg = wintypes.MSG()
             while self.running and self.user32.GetMessageW(
-                ctypes.byref(msg), None, 0, 0
+                    ctypes.byref(msg), None, 0, 0
             ):
                 self.user32.TranslateMessage(ctypes.byref(msg))
                 self.user32.DispatchMessageW(ctypes.byref(msg))
@@ -325,6 +328,19 @@ class Launcher:
                 # Dock windows in a container
                 logger.info("Docking windows")
                 self.user32.ShowWindow(self.hwnd_container, SW_SHOW)
+
+                # Re-find window handles in case they became invalid after undocking
+                topScr = self.user32.FindWindowW(None, TOP_SCREEN_WINDOW_TITLE)
+                bottomScr = self.user32.FindWindowW(None, BOTTOM_SCREEN_WINDOW_TITLE)
+
+                if not topScr or not bottomScr:
+                    logger.error("Failed to find scrcpy windows for re-docking")
+                    return
+
+                # Update handles to ensure they're current
+                self.dock.hwnd_top = topScr
+                self.dock.hwnd_bottom = bottomScr
+
                 self.user32.SetParent(self.dock.hwnd_top, self.hwnd_container)
                 self.user32.SetParent(self.dock.hwnd_bottom, self.hwnd_container)
                 apply_docked_style(self.dock.hwnd_top)
