@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 - 15-02-2026
+### Added
+- Added Wireless Support
+### Bugfixes
+- Fixed issue where bottom screen displays incorrectly, causing non-transparency with screenshots
+- Improved window handling to improve stability
+
 ## 0.2.0 - 31-01-2026
 ### Added
 - Added ability to change Scrcpy Scale
