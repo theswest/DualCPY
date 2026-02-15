@@ -17,7 +17,7 @@
 
 # main.py
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __app_name__ = "ThorCPY"
 __author__ = "the_swest"
 __description__ = "AYN Thor screen mirroring and docking tool"
