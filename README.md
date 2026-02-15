@@ -4,7 +4,7 @@
 
 # ThorCPY
 
-ThorCPY is a Windows-based multi-window Scrcpy launcher, designed specifically for the AYN Thor.
+ThorCPY *(Pronounced "Thor Copy")* is a Windows-based multi-window Scrcpy launcher, designed specifically for the AYN Thor.
 It features a layout editor, window docking, screenshots, and window moving.
 
 It launches two scrcpy windows (one for each display), and embeds them into a native windows container.
@@ -20,7 +20,7 @@ Designed for screensharing, recording or livestreaming.
 
 ## Features:
 
-- Custom dual-screen support built for the AYN Thor
+- Custom dual-screen support built for the AYN Thor, allowing both wired and wireless connections
 - Dock screenshares in a window, or separate them for specific screen captures
 - Layout presets allow you to display the screens precisely the way you want
 - Screenshot capture takes a beautiful screenshot of both screens, including transparency where the screens aren't!
@@ -40,7 +40,7 @@ Technical Features:
 > 1) **On the device, go to Settings > About device.**
 > 2) **Tap the Build number seven times to make Settings > Developer options available.**
 > 3) **Then, enable the USB Debugging option from the Developer options.**
-> You must then connect your thor via USB to your computer 
+> You must then connect your thor via USB to your computer or just launch ThorCPY to start the wireless connection dialogue
 
 
 ### Option 1: Standalone Executable    
@@ -96,7 +96,27 @@ To manually create the `bin` folder, simply extract the [latest release of scrcp
 	- `pip install -r requirements.txt`
 
 ## Usage:
+> **To use ThorCPY, you must have ***USB Debugging*** enabled.**
+> **To install ***USB Debugging***:**
+> 1) **On the device, go to Settings > About device.**
+> 2) **Tap the Build number seven times to make Settings > Developer options available.**
+> 3) **Then, enable the USB Debugging option from the Developer options.**
+> You must then connect your thor via USB to your computer or just launch ThorCPY to start the wireless connection dialogue
 
+### Connection:
+- To connect to ThorCPY, you can either connect via USB (Charging, offline and better connection) or Wireless (No tethers)
+- To connect via USB:
+  - Ensure you have followed the steps above to enable USB Debugging. 
+  - Simply plug in your Thor and launch ThorCPY!
+- To connect wirelessly:
+  - Open ThorCPY without your device being connected via USB
+  - Open the Wireless connection menu
+  - In your Thor's developer settings, enable "Wireless USB Debugging" and press on the text to upen the submenu
+  - Press "Pair with code" and input the IP address, Port and Connection code to pair your device and the computer.
+  - Once the device has been successfuly paired, put the IP and port from the field "IP address & Port" in the settings in the "Connect by IP" settings.
+  - Close the menu - ThorCPY will automatically restart!
+
+### Main Controls:
 - The ThorCPY control panel appears on the right hand side of your screen with the following controls:
 - Global Scale:
     - Adjust the scale of the scrcpy outputs (requires restart)
