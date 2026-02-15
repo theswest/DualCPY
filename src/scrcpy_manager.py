@@ -22,12 +22,13 @@ import subprocess
 import time
 import shutil
 import logging
+import re
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)
 
-# Process creation flags
-CREATE_NO_WINDOW = 0x08000000 # Prevents console window from appearing
+# Process creation flags and prevent console window from appearing
+CREATE_NO_WINDOW = 0x08000000
 
 # Default UI scaling
 DEFAULT_UI_SCALING = 0.6
@@ -50,9 +51,11 @@ SCRCPY_START_DELAY = 1.0
 ADB_CAPTURE_OUTPUT = True
 ADB_SERVER_TIMEOUT = 10
 ADB_TASKKILL_TIMEOUT = 5
+ADB_TCPIP_TIMEOUT = 10
+ADB_CONNECT_TIMEOUT = 10
 
 # Logging constants
-LOG_MULT = 60 # Width of log separator lines
+LOG_MULT = 60
 LOGFILE_ENCODING = "utf-8"
 
 # Scrcpy default parameters
@@ -81,29 +84,29 @@ SCRCPY_RETRY_DELAY = 0.7  # Wait between retry attempts
 PROCESS_TERMINATE_TIMEOUT = 2
 SCRCPY_TERMINATE_TIMEOUT = 3
 
+# Wireless connection defaults
+DEFAULT_WIRELESS_PORT = 5555
+
+
 # Main ScrcpyManager class
 class ScrcpyManager:
     """
     Manages scrcpy instances for controlling and displaying the Thor's screens
-    Handles device detection, window launching, scaling, resolution and process management and shutdown
+    Handles device detection (USB and wireless), window launching, scaling,
+    resolution and process management and shutdown
     """
 
     def __init__(self, scale=DEFAULT_UI_SCALING, scrcpy_bin=None, adb_bin=None, enable_audio_top=True):
         """
         Initialize the scrcpy manager.
-
-        Args:
-            scale: float, scaling factor for window resolution
-            scrcpy_bin: optional custom path to scrcpy binary
-            adb_bin: optional custom path to adb binary
-            enable_audio_top: if True, enable audio on top window
         """
         logger.info(f"Initializing ScrcpyManager (scale={scale}, audio={enable_audio_top})")
 
         self.scale = scale
-        self.processes = [] # Track all scrcpy subprocess instances
+        self.processes = []
         self.serial = None
         self.enable_audio_top = enable_audio_top
+        self.connection_mode = None
 
         # Calculate top screen resolution based on scale
         base_w1 = TOP_SCREEN_BASE_WIDTH
@@ -140,12 +143,6 @@ class ScrcpyManager:
     def _resolve_bin(self, name):
         """
         Finds binary in local ./bin folder or system path.
-
-        Args:
-            name: Binary name (e.g., "scrcpy" or "adb")
-
-        Returns:
-            Full path to binary or None if not found
         """
         logger.debug(f"Resolving binary: {name}")
 
@@ -164,6 +161,12 @@ class ScrcpyManager:
         logger.warning(f"Binary '{name}' not found in local bin or system PATH")
         return None
 
+    def _is_wireless_serial(self, serial):
+        """
+        Check if a serial number is a wireless connection (IP:PORT)
+        """
+        # Wireless connections are in format IP:PORT (e.g., 192.168.1.100:5555)
+        return ':' in serial and re.match(r'\d+\.\d+\.\d+\.\d+:\d+', serial)
 
     def detect_device(self):
         """
@@ -171,9 +174,7 @@ class ScrcpyManager:
 
         Starts ADB server if needed, then queries for authorized devices.
         Ignores unauthorized devices to prevent connection issues.
-
-        Returns:
-            Device serial string or None if no device found
+        Supports both USB and wireless connections.
         """
         logger.info("Starting ADB device detection")
 
@@ -199,206 +200,400 @@ class ScrcpyManager:
             else:
                 logger.debug("ADB server started successfully")
         except subprocess.TimeoutExpired:
-            logger.error("ADB start-server timed out")
-        except Exception as ADBStartError:
-            logger.error(f"Failed to start ADB server: {ADBStartError}", exc_info=True)
+            logger.error("ADB server start timeout")
+            return None
+        except Exception as AdbServerStartError:
+            logger.error(f"Failed to start ADB server: {AdbServerStartError}")
+            return None
 
-        # Query for devices
+        # Get list of devices
         try:
-            logger.debug("Querying connected devices")
-            out = subprocess.check_output([self.adb_bin, "devices"], text=True, timeout=ADB_SERVER_TIMEOUT)
-            logger.debug(f"ADB devices output:\n{out}")
+            logger.debug("Running 'adb devices'")
+            result = subprocess.run(
+                [self.adb_bin, "devices"],
+                capture_output=ADB_CAPTURE_OUTPUT,
+                text=True,
+                timeout=ADB_SERVER_TIMEOUT,
+            )
 
-            # Parse device list (skip header line)
-            lines = out.strip().splitlines()[1:]
-            devices = [
-                line.split()[0] for line in lines if "device" in line and "unauthorized" not in line
-            ]
+            if result.returncode != 0:
+                logger.error(f"'adb devices' failed with code {result.returncode}")
+                return None
 
-            if devices:
-                self.serial = devices[0]
-                logger.info(f"Device detected: {self.serial}")
-                if len(devices) > 1:
-                    logger.info(
-                        f"Multiple devices found ({len(devices)}), using first: {self.serial}"
-                    )
-                return self.serial
-            else:
-                logger.warning("No devices found in ADB device list")
+            # Parse output for authorized devices
+            lines = result.stdout.strip().split("\n")
+            logger.debug(f"ADB devices output: {lines}")
+
+            for line in lines[1:]:
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    serial, status = parts[0], parts[1]
+                    if status == "device":
+                        self.serial = serial
+                        # Determine connection mode
+                        if self._is_wireless_serial(serial):
+                            self.connection_mode = 'wireless'
+                            logger.info(f"Wireless device detected: {serial}")
+                        else:
+                            self.connection_mode = 'usb'
+                            logger.info(f"USB device detected: {serial}")
+                        return serial
+                    elif status == "unauthorized":
+                        logger.warning(f"Unauthorized device found: {serial} (please authorize on device)")
+                    else:
+                        logger.debug(f"Device with non-'device' status: {serial} ({status})")
+
+            logger.warning("No authorized devices found")
+            return None
 
         except subprocess.TimeoutExpired:
-            logger.error("ADB devices command timed out")
-        except subprocess.CalledProcessError as DeviceSearchError:
-            logger.error(f"ADB devices command failed: {DeviceSearchError}", exc_info=True)
-        except Exception as DeviceSearchException:
-            logger.error(f"Unexpected error during device detection: {DeviceSearchException}", exc_info=True)
+            logger.error("'adb devices' command timeout")
+            return None
+        except Exception as AdbDevicesError:
+            logger.error(f"Error during device detection: {AdbDevicesError}")
+            return None
 
-        return None
-
-    # Start Scrcpy Windows
-    def start_scrcpy(self, serial=None, extra_top_args=None, extra_bottom_args=None):
+    def connect_wireless(self, ip_address, port=DEFAULT_WIRELESS_PORT):
         """
-        Launch both scrcpy windows.
-
-        Launches the top screen first, waits for it to be initialized, then launches the bottom screen.
-        Both windows are configured with:
-        Borderless mode, optimized bitrates, 120FPS cap, openGL
-
-        Args:
-            serial: Device serial (uses detected device if None)
-            extra_top_args: Additional CLI arguments for top window
-            extra_bottom_args: Additional CLI arguments for bottom window
-
-        Returns:
-            list: Popen objects for [top_process, bottom_process]
-
-        Raises:
-            RuntimeError: If device serial missing or scrcpy binary not found
+        Connect to a device wirelessly via ADB
         """
-        logger.info("=" * LOG_MULT)
-        logger.info("Starting scrcpy instances")
-        logger.info("=" * LOG_MULT)
+        if not self.adb_bin:
+            logger.error("Cannot connect wirelessly: ADB binary not found")
+            return False
 
-        if serial:
-            self.serial = serial
-            logger.debug(f"Using provided serial: {serial}")
+        target = f"{ip_address}:{port}"
+        logger.info(f"Attempting wireless connection to {target}")
+
+        try:
+            result = subprocess.run(
+                [self.adb_bin, "connect", target],
+                capture_output=ADB_CAPTURE_OUTPUT,
+                text=True,
+                timeout=ADB_CONNECT_TIMEOUT,
+            )
+
+            output = result.stdout.strip() if result.stdout else ""
+
+            if result.returncode == 0 and "connected" in output.lower():
+                logger.info(f"Successfully connected to {target}")
+                self.serial = target
+                self.connection_mode = 'wireless'
+                return True
+            else:
+                # Provide helpful error information
+                error_msg = output if output else "Unknown error"
+                logger.error(f"Failed to connect to {target}: {error_msg}")
+
+                # Detect if this might be a pairing issue
+                if port != DEFAULT_WIRELESS_PORT or "refused" in error_msg.lower() or "failed" in error_msg.lower():
+                    logger.warning("=" * LOG_MULT)
+                    logger.warning("CONNECTION TROUBLESHOOTING:")
+                    logger.warning("=" * LOG_MULT)
+
+                    if port != DEFAULT_WIRELESS_PORT:
+                        logger.warning(f"Non-standard port detected ({port})")
+                        logger.warning("This may be Android 11+ Wireless Debugging mode.")
+                        logger.warning("")
+                        logger.warning("For Wireless Debugging (random port like 46303):")
+                        logger.warning("  1. On device: Developer Options > Wireless Debugging")
+                        logger.warning("  2. Tap 'Pair device with pairing code'")
+                        logger.warning("  3. You must PAIR first using: adb pair IP:PAIRING_PORT")
+                        logger.warning("  4. Enter the 6-digit pairing code shown on device")
+                        logger.warning("  5. After pairing, THEN connect using adb connect")
+                        logger.warning("")
+
+                    logger.warning("For legacy TCP/IP mode (port 5555):")
+                    logger.warning("  1. Connect device via USB first")
+                    logger.warning("  2. Enable wireless mode (button in this app)")
+                    logger.warning("  3. Disconnect USB cable")
+                    logger.warning("  4. Connect using IP:5555")
+                    logger.warning("")
+                    logger.warning("Make sure:")
+                    logger.warning("  • Device and PC are on the same WiFi network")
+                    logger.warning("  • Wireless debugging/ADB over network is enabled on device")
+                    logger.warning("  • No firewall is blocking the connection")
+                    logger.warning("=" * LOG_MULT)
+
+                return False
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Connection timeout for {target}")
+            logger.warning("Connection timed out - device may be unreachable or not on the same network")
+            return False
+        except Exception as WirelessConnectError:
+            logger.error(f"Error connecting wirelessly: {WirelessConnectError}")
+            return False
+
+    def pair_wireless(self, ip_address, pairing_port, pairing_code):
+        """
+        Pair with a device using Android 11+ Wireless Debugging pairing
+
+        This is required for the new wireless debugging feature that uses
+        random ports and requires initial pairing with a code
+        """
+        if not self.adb_bin:
+            logger.error("Cannot pair wirelessly: ADB binary not found")
+            return False
+
+        target = f"{ip_address}:{pairing_port}"
+        logger.info(f"Attempting to pair with {target} using pairing code")
+
+        try:
+            # The adb pair command expects the pairing code to be provided interactively
+            # or we can pass it via stdin
+            process = subprocess.Popen(
+                [self.adb_bin, "pair", target],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+            # Send the pairing code
+            output, _ = process.communicate(input=f"{pairing_code}\n", timeout=ADB_CONNECT_TIMEOUT)
+
+            if process.returncode == 0 and ("successfully paired" in output.lower() or "paired" in output.lower()):
+                logger.info(f"Successfully paired with {target}")
+                return True
+            else:
+                logger.error(f"Failed to pair with {target}: {output}")
+                return False
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Pairing timeout for {target}")
+            return False
+        except Exception as PairingError:
+            logger.error(f"Error during pairing: {PairingError}")
+            return False
+
+    def disconnect_wireless(self, target=None):
+        """
+        Disconnect a wireless ADB connection
+        """
+        if not self.adb_bin:
+            logger.error("Cannot disconnect: ADB binary not found")
+            return False
+
+        disconnect_target = target or self.serial
+        if not disconnect_target:
+            logger.warning("No target specified for disconnection")
+            return False
+
+        logger.info(f"Disconnecting from {disconnect_target}")
+
+        try:
+            result = subprocess.run(
+                [self.adb_bin, "disconnect", disconnect_target],
+                capture_output=ADB_CAPTURE_OUTPUT,
+                text=True,
+                timeout=ADB_CONNECT_TIMEOUT,
+            )
+
+            if result.returncode == 0:
+                logger.info(f"Disconnected from {disconnect_target}")
+                if disconnect_target == self.serial:
+                    self.serial = None
+                    self.connection_mode = None
+                return True
+            else:
+                logger.error(f"Failed to disconnect: {result.stdout}")
+                return False
+
+        except Exception as DisconnectError:
+            logger.error(f"Error disconnecting: {DisconnectError}")
+            return False
+
+    def enable_wireless_mode(self, port=DEFAULT_WIRELESS_PORT):
+        """
+        Enable wireless ADB mode on a USB-connected device
+        This switches the device to TCP/IP mode
+        """
+        if not self.adb_bin:
+            logger.error("Cannot enable wireless mode: ADB binary not found")
+            return False
 
         if not self.serial:
-            logger.error("Cannot start scrcpy: No device serial provided")
-            raise RuntimeError("No device serial provided to ScrcpyManager.start_scrcpy")
+            logger.error("Cannot enable wireless mode: No device connected")
+            return False
+
+        if self._is_wireless_serial(self.serial):
+            logger.warning("Device is already in wireless mode")
+            return True
+
+        logger.info(f"Enabling wireless mode on {self.serial} (port {port})")
+
+        try:
+            result = subprocess.run(
+                [self.adb_bin, "-s", self.serial, "tcpip", str(port)],
+                capture_output=ADB_CAPTURE_OUTPUT,
+                text=True,
+                timeout=ADB_TCPIP_TIMEOUT,
+            )
+
+            if result.returncode == 0:
+                logger.info(f"Wireless mode enabled on port {port}")
+                return True
+            else:
+                logger.error(f"Failed to enable wireless mode: {result.stdout}")
+                return False
+
+        except subprocess.TimeoutExpired:
+            logger.error("Timeout enabling wireless mode")
+            return False
+        except Exception as WirelessEnableError:
+            logger.error(f"Error enabling wireless mode: {WirelessEnableError}")
+            return False
+
+    def get_device_ip(self):
+        """
+        Get the IP address of the connected USB device
+        """
+        if not self.adb_bin or not self.serial:
+            logger.error("Cannot get device IP: No device connected")
+            return None
+
+        if self._is_wireless_serial(self.serial):
+            # Extract IP from wireless serial
+            return self.serial.split(':')[0]
+
+        logger.debug("Attempting to retrieve device IP address")
+
+        try:
+            # Try to get IP from wlan0 interface
+            result = subprocess.run(
+                [self.adb_bin, "-s", self.serial, "shell", "ip", "addr", "show", "wlan0"],
+                capture_output=ADB_CAPTURE_OUTPUT,
+                text=True,
+                timeout=ADB_SERVER_TIMEOUT,
+            )
+
+            if result.returncode == 0:
+                # Parse IP from output (format: "inet 192.168.1.100/24")
+                for line in result.stdout.split('\n'):
+                    if 'inet ' in line:
+                        parts = line.strip().split()
+                        for i, part in enumerate(parts):
+                            if part == 'inet' and i + 1 < len(parts):
+                                ip_with_mask = parts[i + 1]
+                                ip = ip_with_mask.split('/')[0]
+                                logger.info(f"Device IP address: {ip}")
+                                return ip
+
+            logger.warning("Could not find IP address in wlan0 output")
+            return None
+
+        except Exception as GetIPError:
+            logger.error(f"Error getting device IP: {GetIPError}")
+            return None
+
+    def start_scrcpy(self, serial=None):
+        """
+        Start both scrcpy windows (top and bottom screen)
+        Supports both USB and wireless connections
+        """
+        use_serial = serial or self.serial
+        if not use_serial:
+            raise RuntimeError("No device serial available")
+
+        logger.info("=" * LOG_MULT)
+        logger.info(f"Starting scrcpy for device: {use_serial}")
+        logger.info(f"Connection mode: {self.connection_mode or 'unknown'}")
+        logger.info("=" * LOG_MULT)
 
         if not self.scrcpy_bin:
-            logger.error("Cannot start scrcpy: scrcpy binary not found")
             raise RuntimeError("scrcpy binary not found")
 
-        logger.info(f"Device serial: {self.serial}")
-        logger.info(f"Scrcpy binary: {self.scrcpy_bin}")
+        time.sleep(self.scrcpy_start_delay)
 
-        # Base arguments for both windows
-        base = [
-            self.scrcpy_bin,
-            "-s",
-            self.serial,
-            "--window-borderless",
-            "--max-fps",
-            DEFAULT_MAX_FPS,
-            "--render-driver",
-            DEFAULT_RENDER_DRIVER,
-            "--mouse-bind=++++", # Enable all mouse bindings
-        ]
-
-        # Calculate bitrates based on resolution
-        bitrate_top = f"{max(TOP_BITRATE_MINIMUM, int(TOP_BITRATE_SCALE * 
-                                                      (self.scale**BITRATE_CALC_SCALE_FACTOR)))}M"
-        bitrate_bottom = f"{max(BOTTOM_BITRATE_MINIMUM, int(BOTTOM_BITRATE_SCALE * 
-                                                            (self.scale**BITRATE_CALC_SCALE_FACTOR)))}M"
-        logger.info(f"Video bitrates - Top: {bitrate_top}, Bottom: {bitrate_bottom}")
-
-        # Top window arguments
-        top_args = base + [
-            "--display-id",
+        # Launch top screen
+        logger.info("Starting top screen window")
+        self._start_window(
+            use_serial,
             TOP_SCREEN_DISPLAY_ID,
-            "--window-title",
             TOP_SCREEN_WINDOW_TITLE,
-            "--window-width",
-            str(self.f_w1),
-            "--video-bit-rate",
-            bitrate_top,
-        ]
+            self.f_w1,
+            self.f_h1,
+            enable_audio=self.enable_audio_top,
+            bitrate_min=TOP_BITRATE_MINIMUM,
+            bitrate_scale=TOP_BITRATE_SCALE,
+        )
 
-        # Audio only on the top window to avoid conflicts
-        if not self.enable_audio_top:
-            top_args += ["--no-audio"]
-            logger.debug("Audio disabled for top window")
-        else:
-            logger.debug("Audio enabled for top window")
-
-        if extra_top_args:
-            top_args += extra_top_args
-            logger.debug(f"Extra top args: {extra_top_args}")
-
-        # Bottom window arguments (Always no audio)
-        bottom_args = base + [
-            "--display-id",
-            BOTTOM_SCREEN_DISPLAY_ID,
-            "--window-title",
-            BOTTOM_SCREEN_WINDOW_TITLE,
-            "--window-width",
-            str(self.f_w2),
-            "--video-bit-rate",
-            bitrate_bottom,
-            "--no-audio",
-        ]
-
-        if extra_bottom_args:
-            bottom_args += extra_bottom_args
-            logger.debug(f"Extra bottom args: {extra_bottom_args}")
-
-        # Start top screen first
-        logger.info(f"Starting TOP window ({TOP_SCREEN_WINDOW_TITLE})")
-        logger.debug(f"Top window command: {' '.join(top_args)}")
-        p0 = self._start_with_retry(top_args, "top")
-
-        # Wait for top screen to initialise before starting bottom
-        logger.info(f"Waiting {self.scrcpy_start_delay}s before starting bottom window")
+        # Wait for first display to stabilize
         time.sleep(DISPLAY_INIT_DELAY)
 
-        # Start bottom screen
-        logger.info(f"Starting BOTTOM window ({BOTTOM_SCREEN_WINDOW_TITLE})")
-        logger.debug(f"Bottom window command: {' '.join(bottom_args)}")
-        p1 = self._start_with_retry(bottom_args, "bottom")
-
-        logger.info("Both scrcpy instances started successfully")
-        logger.info("=" * LOG_MULT)
-        return [p0, p1]
-
-    def _start_with_retry(self, cmd, label):
-        """
-        Start a process and retry on failure.
-        Logs to ./logs/ if possible.
-
-        Args:
-            cmd: Command list to execute
-            label: Label for logging (e.g., "top" or "bottom")
-
-        Returns:
-            Popen instance
-
-        Raises:
-            Exception: If all retry attempts fail
-        """
-        logger.debug(
-            f"Starting scrcpy {label} window with {self.scrcpy_retry_count} retry attempts"
+        # Launch bottom screen
+        logger.info("Starting bottom screen window")
+        self._start_window(
+            use_serial,
+            BOTTOM_SCREEN_DISPLAY_ID,
+            BOTTOM_SCREEN_WINDOW_TITLE,
+            self.f_w2,
+            self.f_h2,
+            enable_audio=False,
+            bitrate_min=BOTTOM_BITRATE_MINIMUM,
+            bitrate_scale=BOTTOM_BITRATE_SCALE,
         )
-        last_exc = None
 
+        logger.info("All scrcpy windows started successfully")
+        logger.info("=" * LOG_MULT)
+
+    def _start_window(
+            self,
+            serial,
+            display_id,
+            window_title,
+            width,
+            height,
+            enable_audio=False,
+            bitrate_min=8,
+            bitrate_scale=32,
+    ):
+        """
+        Start a single scrcpy window with retry logic
+        """
+        label = f"'{window_title}'"
+        logger.debug(f"Preparing to start {label} (display {display_id})")
+
+        # Calculate bitrate based on resolution
+        pixels = width * height
+        bitrate_mbps = max(bitrate_min, int(pixels / 1e6 * bitrate_scale * BITRATE_CALC_SCALE_FACTOR))
+        bitrate_str = f"{bitrate_mbps}M"
+        logger.debug(f"{label} bitrate: {bitrate_str}")
+
+        # Build command
+        cmd = [
+            self.scrcpy_bin,
+            "--serial", serial,
+            "--display-id", display_id,
+            "--window-title", window_title,
+            "--max-size", f"{width}",
+            "--video-bit-rate", bitrate_str,
+            "--max-fps", DEFAULT_MAX_FPS,
+            "--render-driver", DEFAULT_RENDER_DRIVER,
+        ]
+
+        # Audio settings
+        if enable_audio:
+            cmd.append("--audio-bit-rate=256K")
+        else:
+            cmd.append("--no-audio")
+
+        logger.debug(f"Command: {' '.join(cmd)}")
+
+        # Retry logic
+        last_exc = None
         for attempt in range(1, self.scrcpy_retry_count + 1):
             try:
-                logger.debug(
-                    f"Attempt {attempt}/{self.scrcpy_retry_count} for {label} window"
+                logger.info(f"Starting {label} (attempt {attempt}/{self.scrcpy_retry_count})")
+
+                proc = subprocess.Popen(
+                    cmd,
+                    creationflags=CREATE_NO_WINDOW,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                 )
 
-                # Create log file for subprocess output
-                logfile = None
-                try:
-                    logs_dir = os.path.join(os.getcwd(), "logs")
-                    os.makedirs(logs_dir, exist_ok=True)
-                    stamp = time.strftime("%Y%m%d_%H%M%S")
-                    log_path = os.path.join(logs_dir, f"scrcpy_{label}_{stamp}.log")
-                    logfile = open(log_path, "w", encoding=LOGFILE_ENCODING)
-                    logger.debug(f"Scrcpy {label} output logging to: {log_path}")
-                except Exception as LogFileCreationError:
-                    logger.warning(f"Failed to create scrcpy log file: {LogFileCreationError}")
-                    logfile = None
-
-                # Redirect output to log file
-                stdout = logfile if logfile else subprocess.DEVNULL
-                stderr = logfile if logfile else subprocess.DEVNULL
-
-                # Start process
-                proc = subprocess.Popen(cmd, stdout=stdout, stderr=stderr, creationflags=CREATE_NO_WINDOW)
-
-                # Verify process didn't instantly crash
+                # Quick check if process survives startup
                 time.sleep(SCRCPY_CREATION_DELAY)
                 if proc.poll() is not None:
                     raise RuntimeError(
@@ -429,10 +624,7 @@ class ScrcpyManager:
         """
         Check if any processes that were tracked have died
 
-        Returns the first process that is no longer alive or None if all are running.
-
-        Returns:
-            Popen object of dead process or None if all alive
+        Returns the first process that is no longer alive or None if all are running
         """
         for processName, process in enumerate(self.processes):
             try:
