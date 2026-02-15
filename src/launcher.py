@@ -20,6 +20,8 @@
 import threading
 import time
 import ctypes
+import tkinter as tk
+from tkinter import messagebox
 
 import pygame
 import os
@@ -32,6 +34,7 @@ from src.presets import PresetStore
 from src.config import ConfigManager
 from src.ui_pygame import show_loading_screen
 from src.win32_darkmode import enable_dark_titlebar
+from src.wireless_dialog import show_wireless_dialog
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,9 @@ WS_VISIBLE = 0x10000000
 WS_CLIPCHILDREN = 0x02000000
 WS_CLIPSIBLINGS = 0x04000000
 WS_EX_CONTROLPARENT = 0x00010000
+
+WM_MOUSEACTIVATE = 0x0021
+MA_ACTIVATE = 1
 
 # Window show/hide constants
 SW_HIDE = 0
@@ -128,6 +134,10 @@ class Launcher:
             f"Layout Reset: Top(0,0), Bottom({self.bx}, {self.by}) at Scale {self.global_scale}"
         )
 
+        # Single persistent tkinter root so all dialogs use it as their parent without corrupting control window's state
+        self._tk_root = tk.Tk()
+        self._tk_root.withdraw()
+
         # Initialise window management
         self.dock = Win32Dock()
         self.running = False
@@ -155,30 +165,35 @@ class Launcher:
 
     def save_layout(self):
         """
-        Saves current state and scale to config file
-        Called during shutdown to keep settings
+        Saves current state and scale to config file in a single write
+        Called during shutdown to keep settings.
         """
         try:
-            self.config.set("tx", self.tx)
-            self.config.set("ty", self.ty)
-            self.config.set("bx", self.bx)
-            self.config.set("by", self.by)
-            self.config.set("global_scale", self.global_scale)
+            cfg = self.config.load()
+            cfg["tx"] = self.tx
+            cfg["ty"] = self.ty
+            cfg["bx"] = self.bx
+            cfg["by"] = self.by
+            cfg["global_scale"] = self.global_scale
+            self.config.save(cfg)
             logger.info(f"Saved configuration (Scale: {self.global_scale})")
         except Exception as SaveConfigError:
             logger.error(f"Failed to save configuration: {SaveConfigError}")
 
     def save_scale(self):
-        """Save only the global scale to config for when the scale changes in ui_pygame"""
-        self.config.set("global_scale", self.global_scale)
+        """Save only the global scale to config in a single write"""
+        try:
+            cfg = self.config.load()
+            cfg["global_scale"] = self.global_scale
+            self.config.save(cfg)
+        except Exception as SaveScaleError:
+            logger.error(f"Failed to save scale: {SaveScaleError}")
 
     def _create_wnd_proc(self):
-        """
-        Creates a windows procedure callback for the window
-        Handles window messaged like WM_CLOSE and WM_DESTROY by calling stop()
-        Returns:
-            WNDPROC: Window procedure callback function
-        """
+        # We only need these two for the stable "double-click style" logic
+        WM_LBUTTONDOWN = 0x0201
+        WM_PARENTNOTIFY = 0x0210
+
         WNDPROC = ctypes.WINFUNCTYPE(
             self.LRESULT, wintypes.HWND, wintypes.UINT, self.WPARAM, self.LPARAM
         )
@@ -187,6 +202,38 @@ class Launcher:
             if msg in (WM_CLOSE, WM_DESTROY):
                 self.stop()
                 return 0
+
+            # New: Handle activation when the mouse enters/clicks the container
+            if msg == WM_MOUSEACTIVATE:
+                # Get mouse position relative to container
+                pt = wintypes.POINT()
+                self.user32.GetCursorPos(ctypes.byref(pt))
+                self.user32.ScreenToClient(hwnd, ctypes.byref(pt))
+
+                # Check if mouse is over top or bottom screen and force focus
+                if (self.tx <= pt.x <= self.tx + self.scrcpy.f_w1 and
+                        self.ty <= pt.y <= self.ty + self.scrcpy.f_h1):
+                    self.dock.force_focus(self.dock.hwnd_top)
+                elif (self.bx <= pt.x <= self.bx + self.scrcpy.f_w2 and
+                      self.by <= pt.y <= self.by + self.scrcpy.f_h2):
+                    self.dock.force_focus(self.dock.hwnd_bottom)
+                return MA_ACTIVATE
+
+            # This is the ONLY place focus should be handled
+            if msg == WM_PARENTNOTIFY:
+                if (wp & 0xFFFF) == WM_LBUTTONDOWN:
+                    # lp contains coordinates relative to the ThorCPY container
+                    mx = lp & 0xFFFF
+                    my = (lp >> 16) & 0xFFFF
+
+                    if (self.tx <= mx <= self.tx + self.scrcpy.f_w1 and
+                            self.ty <= my <= self.ty + self.scrcpy.f_h1):
+                        self.dock.force_focus(self.dock.hwnd_top)
+
+                    elif (self.bx <= mx <= self.bx + self.scrcpy.f_w2 and
+                          self.by <= my <= self.by + self.scrcpy.f_h2):
+                        self.dock.force_focus(self.dock.hwnd_bottom)
+
             return self.user32.DefWindowProcW(hwnd, msg, wp, lp)
 
         return WNDPROC(py_wndproc)
@@ -349,12 +396,71 @@ class Launcher:
 
                 logger.info("Windows docked successfully")
 
+    def show_connection_dialog(self):
+        """
+        Shows the wireless connection dialog
+        Hides the scrcpy container and pygame control panel first so their
+        Win32 handles don't conflict with the tkinter dialog grab, then
+        restores them when the dialog closes
+        """
+        logger.info("Opening wireless connection dialog — hiding scrcpy windows")
+
+        # Hide pygame control panel
+        try:
+            info = pygame.display.get_wm_info()
+            hwnd_pygame = info.get("window")
+            if hwnd_pygame:
+                self.user32.ShowWindow(hwnd_pygame, SW_HIDE)
+        except Exception as HidePygameError:
+            logger.warning(f"Could not hide pygame window: {HidePygameError}")
+
+        # Hide scrcpy container and child windows
+        if self.hwnd_container:
+            self.user32.ShowWindow(self.hwnd_container, SW_HIDE)
+
+        try:
+            result = show_wireless_dialog(self._tk_root, self.scrcpy, config=self.config)
+
+            if result == 'connected':
+                logger.info("Wireless connection established via dialog")
+                return True
+            elif result == 'disconnected':
+                logger.info("Device disconnected via dialog")
+                return False
+            else:
+                logger.info("Dialog closed without action")
+                return None
+
+        except Exception as DialogError:
+            logger.error(f"Error showing wireless dialog: {DialogError}")
+            messagebox.showerror(
+                "Dialog Error",
+                f"Failed to show wireless connection dialog:\n{DialogError}"
+            )
+            return None
+
+        finally:
+            logger.info("Wireless dialog closed — restoring scrcpy windows")
+            # Restore scrcpy container
+            if self.hwnd_container:
+                self.user32.ShowWindow(self.hwnd_container, SW_SHOW)
+
+            # Restore pygame control panel
+            try:
+                info = pygame.display.get_wm_info()
+                hwnd_pygame = info.get("window")
+                if hwnd_pygame:
+                    self.user32.ShowWindow(hwnd_pygame, SW_SHOW)
+                    self.user32.SetForegroundWindow(hwnd_pygame)
+            except Exception as ShowPygameError:
+                logger.warning(f"Could not restore pygame window: {ShowPygameError}")
+
     def launch(self):
         """
         Main application entry point.
         Starts all components in the following order:
         1) Shows the loading screen
-        2) Detects the android device via ADB
+        2) Detects the android device via ADB or shows wireless window
         3) Start the scrcpy instances for both screens
         4) Creates the container window
         5) Starts the docking monitor
@@ -370,11 +476,42 @@ class Launcher:
         self._wndproc = self._create_wnd_proc()
         show_loading_screen()
 
-        # Detect and start scrcpy
+        # Detect device
         serial = self.scrcpy.detect_device()
+
+        # If no device found, suggest wireless connection
+        if not serial:
+            logger.info("No USB device found, offering wireless connection")
+
+            response = messagebox.askyesno(
+                "No Device Found",
+                "No USB device detected.\n\n"
+                "Would you like to connect wirelessly?\n\n"
+                "Click Yes to open the wireless connection dialog,\n"
+                "or No to exit."
+            )
+
+            if response:
+                result = show_wireless_dialog(self._tk_root, self.scrcpy, config=self.config)
+
+                if result == 'connected':
+                    serial = self.scrcpy.serial
+                    logger.info(f"Connected wirelessly to {serial}")
+                else:
+                    logger.info("No wireless connection established")
+                    self.stop()
+                    return
+            else:
+                logger.info("User chose to exit")
+                self.stop()
+                return
+
+        # Start scrcpy if no device is connected
         if serial:
+            logger.info(f"Starting scrcpy with device: {serial} (mode: {self.scrcpy.connection_mode})")
             self.scrcpy.start_scrcpy(serial)
         else:
+            logger.error("No device available to start scrcpy")
             self.stop()
             return
 
@@ -390,7 +527,6 @@ class Launcher:
         clock = pygame.time.Clock()
 
         while self.running:
-            # Handle pygame events
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.stop()
