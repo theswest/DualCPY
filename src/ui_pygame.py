@@ -126,28 +126,34 @@ SLIDER_BOTTOM_Y_Y = 370
 
 # Dock/Undock button
 UNDOCK_BUTTON_X = 40
-UNDOCK_BUTTON_Y = 420
+UNDOCK_BUTTON_Y = 415
 UNDOCK_BUTTON_WIDTH = 180
-UNDOCK_BUTTON_HEIGHT = 40
+UNDOCK_BUTTON_HEIGHT = 36
 
 # Screenshot button
 SCREENSHOT_BUTTON_X = 230
-SCREENSHOT_BUTTON_Y = 420
+SCREENSHOT_BUTTON_Y = 415
 SCREENSHOT_BUTTON_WIDTH = 180
-SCREENSHOT_BUTTON_HEIGHT = 40
+SCREENSHOT_BUTTON_HEIGHT = 36
+
+# Wireless button
+WIRELESS_BUTTON_X = 40
+WIRELESS_BUTTON_Y = 460
+WIRELESS_BUTTON_WIDTH = 370
+WIRELESS_BUTTON_HEIGHT = 36
 
 STATUS_TEXT_X = 225
-STATUS_TEXT_Y = 467
+STATUS_TEXT_Y = 505
 
 # Preset section layout
-PRESET_DIVIDER_Y = 485
+PRESET_DIVIDER_Y = 510
 PRESET_DIVIDER_LEFT = 20
 PRESET_DIVIDER_RIGHT = 430
 
 PRESET_HEADER_X = 20
-PRESET_HEADER_Y = 505
+PRESET_HEADER_Y = 530
 
-PRESET_Y = 540
+PRESET_Y = 565
 PRESET_HEIGHT = 35
 
 PRESET_INPUT_X = 40
@@ -173,8 +179,8 @@ BLACK_TEXT = (0, 0, 0)
 
 # Preset list layout
 PRESET_LIST_HEADER_X = 20
-PRESET_LIST_HEADER_Y = 600
-PRESET_LIST_Y_OFFSET = 635
+PRESET_LIST_HEADER_Y = 625
+PRESET_LIST_Y_OFFSET = 660
 
 PRESET_ROW_X = 30
 PRESET_ROW_WIDTH = 390
@@ -790,6 +796,52 @@ class PygameUI:
             ):
                 self.take_screenshot()
                 self.m_locked = True
+
+            # Wireless Button
+            wireless_btn = pygame.Rect(
+                WIRELESS_BUTTON_X, WIRELESS_BUTTON_Y,
+                WIRELESS_BUTTON_WIDTH, WIRELESS_BUTTON_HEIGHT
+            )
+            w_hover = wireless_btn.collidepoint(mx, my)
+
+            # Label shows current connection state
+            serial = self.l.scrcpy.serial
+            mode = self.l.scrcpy.connection_mode
+            if serial and mode == 'wireless':
+                w_label = f"WIRELESS  •  Connected!"
+                w_color = self.colors["success"] if not w_hover else hex_to_rgb("#27ae60")
+                w_text_color = BLACK_TEXT
+            elif serial and mode == 'usb':
+                w_label = "WIRELESS  •  USB connected"
+                w_color = self.colors["panel"] if not w_hover else self.colors["border"]
+                w_text_color = self.colors["text"]
+            else:
+                w_label = "WIRELESS  •  No device"
+                w_color = self.colors["panel"] if not w_hover else self.colors["border"]
+                w_text_color = self.colors["text"]
+
+            pygame.draw.rect(self.screen, w_color, wireless_btn, border_radius=5)
+            wtxt = self.font_md.render(w_label, True, w_text_color)
+            wtxt_rect = wtxt.get_rect(center=wireless_btn.center)
+            self.screen.blit(wtxt, wtxt_rect)
+
+            if w_hover and m_click and not self.m_locked and not self.dragging:
+                self.pressed_button = "wireless"
+
+            if not m_click and self.pressed_button == "wireless":
+                if w_hover:
+                    logger.info("Wireless button clicked — opening connection dialog")
+                    self._open_wireless_dialog = True
+                self.pressed_button = None
+
+            # Open wireless dialog on main thread (tkinter requirement)
+            if getattr(self, '_open_wireless_dialog', False):
+                self._open_wireless_dialog = False
+                result = self.l.show_connection_dialog()
+                if result is True:
+                    self.show_status("Wireless connected", "success")
+                elif result == 'disconnected':
+                    self.show_status("Wireless disconnected", "warning")
 
             # Status Messages
             if time.time() - self.status_time < self.status_duration:
