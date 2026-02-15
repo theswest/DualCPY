@@ -42,6 +42,8 @@ WS_THICKFRAME = 0x00040000  # Resizable frame
 WS_MINIMIZEBOX = 0x00020000  # Minimize button
 WS_MAXIMIZEBOX = 0x00010000  # Maximize button
 WS_SYSMENU = 0x00080000  # System menu (close button)
+WS_TABSTOP = 0x00010000
+WS_EX_CONTROLPARENT = 0x00010000
 
 # Window clipping flags
 WS_CLIPCHILDREN = 0x02000000  # Prevent parent from drawing over children
@@ -49,6 +51,9 @@ WS_CLIPSIBLINGS = 0x04000000  # Prevent siblings from drawing over each other
 
 # Window combination styles
 WS_OVERLAPPEDWINDOW = 0x00CF0000  # Standard overlapped window (title bar, resize, min/max/close buttons)
+
+# Set focus
+WM_SETFOCUS = 0x0007
 
 # SetWindowPos flags
 SWP_NOZORDER = 0x0004  # Don't change Z order
@@ -175,6 +180,32 @@ class Win32Dock:
         except Exception as WindowSyncError:
             logger.error(f"Error during window sync: {WindowSyncError}", exc_info=True)
 
+    def force_focus(self, hwnd):
+        """Forces keyboard focus by linking thread input queues."""
+        if not hwnd or not user32.IsWindow(hwnd):
+            return
+
+        target_thread = user32.GetWindowThreadProcessId(hwnd, None)
+        current_thread = kernel32.GetCurrentThreadId()
+
+        attached = False
+        try:
+            if target_thread != current_thread:
+                attached = bool(user32.AttachThreadInput(current_thread, target_thread, True))
+
+            user32.SetFocus(hwnd)
+            user32.SetForegroundWindow(hwnd)  # Explicitly bring to front
+            user32.SendMessageW(hwnd, 0x0007, 0, 0)  # WM_SETFOCUS
+
+            # Give scrcpy/SDL a millisecond to register the change
+            time.sleep(0.01)
+
+            logger.debug(f"Keyboard focus linked to HWND: {hwnd}")
+        except Exception as e:
+            logger.error(f"Focus error: {e}")
+        finally:
+            if attached:
+                user32.AttachThreadInput(current_thread, target_thread, False)
 
 # Window Style Transformers
 def apply_docked_style(hwnd):
@@ -213,7 +244,7 @@ def apply_docked_style(hwnd):
         )
 
         # Add child mode + clipping
-        style |= WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
+        style |= WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_TABSTOP
 
         logger.debug(f"New window style: 0x{style:08x}")
 
@@ -271,11 +302,11 @@ def apply_undocked_style(hwnd):
 
         logger.debug(f"Current window style: 0x{style:08x}")
 
-        # Remove child flag
-        style &= ~WS_CHILD
+        # Remove child flag and all decorations
+        style &= ~(WS_CHILD | WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_BORDER)
 
-        # Restore standard window
-        style |= WS_OVERLAPPEDWINDOW
+        # Keep visible as a top-level window with clipping
+        style |= WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
 
         logger.debug(f"New window style: 0x{style:08x}")
 
