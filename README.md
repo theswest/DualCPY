@@ -12,6 +12,7 @@ Designed for screensharing, recording or livestreaming.
 
 **ThorCPY is primarily designed for Windows 11. It will work on Windows 10, however bugs may occur!**
 
+Please report any issues at https://github.com/theswest/ThorCPY/issues
 
 | Main UI                             | ThorCPY Screenshot                             |
 |-------------------------------------|------------------------------------------------|
