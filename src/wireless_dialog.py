@@ -487,7 +487,8 @@ class WirelessConnectionDialog:
                     "Connection Successful",
                     f"Successfully connected to {ip}:{port}\n\n"
                     "You can now close the Wireless Connection Window and start using ThorCPY wirelessly!\n"
-                    "You may have to restart ThorCPY for changes to take effect."
+                    "You may have to restart ThorCPY for changes to take effect.\n"
+                    "If the ThorCPY main window doesn't open check it's not open in the background!"
                 )
                 self.result = 'connected'
                 self._update_status()
