@@ -250,7 +250,8 @@ class WirelessConnectionDialog:
         ttk.Label(port_row, text="Port:", width=12, anchor=tk.W, font=self.font_normal).pack(side=tk.LEFT, padx=(0, 5))
         self.port_entry = ttk.Entry(port_row, width=15, font=self.font_mono)
         self.port_entry.pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Label(port_row, text="The port from the MAIN wireless debugging page", foreground="gray", font=self.font_small).pack(side=tk.LEFT)
+        ttk.Label(port_row, text="The port from the MAIN wireless debugging page", foreground="gray",
+                  font=self.font_small).pack(side=tk.LEFT)
 
         # Connect button - prominent
         self.connect_btn = ttk.Button(
@@ -611,6 +612,7 @@ class WirelessConnectionDialog:
     def _on_close(self):
         """
         Save inputs, release modal grab, then destroy the dialog.
+        Brings the main ThorCPY pygame window to foreground after closing.
         Operations are ordered to avoid Tkinter errors on destruction.
         """
         self._save_inputs()
@@ -622,6 +624,28 @@ class WirelessConnectionDialog:
             self.dialog.destroy()
         except Exception as DialogDestroyError:
             logger.warning(f"Error destroying dialog: {DialogDestroyError}")
+
+        # Bring the main ThorCPY pygame window to foreground
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+
+            # Find the ThorCPY Control Panel window by title
+            hwnd = user32.FindWindowW(None, "ThorCPY Control Panel")
+
+            if hwnd:
+                # Bring window to foreground
+                # SW_RESTORE = 9 (restore if minimized)
+                user32.ShowWindow(hwnd, 9)
+                user32.SetForegroundWindow(hwnd)
+                logger.debug("Main ThorCPY window brought to foreground")
+            else:
+                logger.debug("Could not find ThorCPY Control Panel window")
+        except Exception as ForegroundError:
+            logger.warning(f"Error bringing main window to foreground: {ForegroundError}")
+
         logger.info("Wireless connection dialog closed")
 
     def show(self):
