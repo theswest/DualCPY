@@ -248,6 +248,9 @@ Feel free to submit a pull request. For major changes, please open an issue firs
 This was originally built as a quick personal tool, so refactoring PRs are especially welcome!
 
 
+## Supporting:
+Buy me a coffee: https://ko-fi.com/theswest
+
 ## Acknowledgements:
 
 - **[eldermonkey](https://github.com/eldermonkey)** - For making the incredible logo
