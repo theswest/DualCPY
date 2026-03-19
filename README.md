@@ -11,6 +11,7 @@ It launches two scrcpy windows (one for each display), and embeds them into a na
 Designed for screensharing, recording or livestreaming.
 
 **ThorCPY is primarily designed for Windows 11. It will work on Windows 10, however bugs may occur!**
+
 **For Linux users, please use the Linux Port: https://github.com/DrSkyfaR/ThorCPY-Linux**
 
 Please report any issues at https://github.com/theswest/ThorCPY/issues
