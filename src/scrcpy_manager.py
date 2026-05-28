@@ -64,7 +64,7 @@ LOG_MULT = 60
 LOGFILE_ENCODING = "utf-8"
 
 # Scrcpy default parameters
-DEFAULT_MAX_FPS = "120"
+DEFAULT_MAX_FPS = "60"
 DEFAULT_RENDER_DRIVER = "direct3d11"
 DEFAULT_VIDEO_CODEC = "h264"
 
@@ -102,17 +102,23 @@ class ScrcpyManager:
     resolution and process management and shutdown
     """
 
-    def __init__(self, scale=DEFAULT_UI_SCALING, scrcpy_bin=None, adb_bin=None, enable_audio_top=True):
+    def __init__(self, scale=DEFAULT_UI_SCALING, scrcpy_bin=None, adb_bin=None,
+                 enable_audio_top=True, max_fps=int(DEFAULT_MAX_FPS)):
         """
         Initialize the scrcpy manager.
         """
-        logger.info(f"Initializing ScrcpyManager (scale={scale}, audio={enable_audio_top})")
+        logger.info(
+            f"Initializing ScrcpyManager (scale={scale}, audio={enable_audio_top}, fps={max_fps})"
+        )
 
         self.scale = scale
         self.processes = []
         self.serial = None
         self.enable_audio_top = enable_audio_top
         self.connection_mode = None
+        # Configurable per-instance FPS cap (override the module default)
+        self.max_fps = int(max_fps) if max_fps else int(DEFAULT_MAX_FPS)
+        self._scrcpy_log_handles = []
 
         # Calculate top screen resolution based on scale
         base_w1 = TOP_SCREEN_BASE_WIDTH
@@ -562,6 +568,7 @@ class ScrcpyManager:
             enable_audio=self.enable_audio_top,
             bitrate_min=TOP_BITRATE_MINIMUM,
             bitrate_scale=TOP_BITRATE_SCALE,
+            max_fps_override=self.max_fps,
         )
 
         # Wait for first display to stabilize
@@ -593,6 +600,7 @@ class ScrcpyManager:
             enable_audio=False,
             bitrate_min=8,
             bitrate_scale=32,
+            max_fps_override=None,
     ):
         """
         Start a single scrcpy window with retry logic
@@ -625,11 +633,12 @@ class ScrcpyManager:
             "--window-title", window_title,
             "--max-size", f"{width}",
             "--video-bit-rate", bitrate_str,
-            "--max-fps", DEFAULT_MAX_FPS,
+            "--max-fps", str(max_fps_override if max_fps_override is not None else self.max_fps),
             "--render-driver", DEFAULT_RENDER_DRIVER,
             "--video-codec", DEFAULT_VIDEO_CODEC,
             "--video-encoder=c2.qti.avc.encoder",
             f"--video-codec-options={codec_options}",
+            "--print-fps",
         ]
 
         # Audio settings
@@ -820,6 +829,14 @@ class ScrcpyManager:
         process_count = len(self.processes)
         self.processes = []
         logger.info(f"Cleared {process_count} process(es) from tracking list")
+
+        # Close any per-instance scrcpy log files we opened
+        for handle in self._scrcpy_log_handles:
+            try:
+                handle.close()
+            except Exception:
+                pass
+        self._scrcpy_log_handles = []
 
         # Device-side cleanup (scrcpy server and app_process)
         if self.serial and self.adb_bin:

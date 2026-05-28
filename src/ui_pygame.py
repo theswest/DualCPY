@@ -44,7 +44,8 @@ LOADING_SCREEN_Y = 80
 # Control panel window configuration
 CONTROL_PANEL_OFFSET_X = 460
 CONTROL_PANEL_WIDTH = 450
-CONTROL_PANEL_HEIGHT = 900
+# A bit taller than upstream to accommodate the FPS / RESTART row
+CONTROL_PANEL_HEIGHT = 950
 
 # Font sizes
 LARGE_FONT_SIZE = 24
@@ -124,36 +125,51 @@ SLIDER_TOP_Y_Y = 250
 SLIDER_BOTTOM_X_Y = 310
 SLIDER_BOTTOM_Y_Y = 370
 
+# FPS selector + RESTART row
+FPS_BUTTON_X = 40
+FPS_BUTTON_Y = 410
+FPS_BUTTON_WIDTH = 180
+FPS_BUTTON_HEIGHT = 36
+
+# FPS dropdown menu (drawn last so it overlays everything below it).
+FPS_MENU_ITEM_HEIGHT = 30
+FPS_MENU_PADDING = 4
+
+RESTART_BUTTON_X = 230
+RESTART_BUTTON_Y = 410
+RESTART_BUTTON_WIDTH = 180
+RESTART_BUTTON_HEIGHT = 36
+
 # Dock/Undock button
 UNDOCK_BUTTON_X = 40
-UNDOCK_BUTTON_Y = 415
+UNDOCK_BUTTON_Y = 460
 UNDOCK_BUTTON_WIDTH = 180
 UNDOCK_BUTTON_HEIGHT = 36
 
 # Screenshot button
 SCREENSHOT_BUTTON_X = 230
-SCREENSHOT_BUTTON_Y = 415
+SCREENSHOT_BUTTON_Y = 460
 SCREENSHOT_BUTTON_WIDTH = 180
 SCREENSHOT_BUTTON_HEIGHT = 36
 
 # Wireless button
 WIRELESS_BUTTON_X = 40
-WIRELESS_BUTTON_Y = 460
+WIRELESS_BUTTON_Y = 505
 WIRELESS_BUTTON_WIDTH = 370
 WIRELESS_BUTTON_HEIGHT = 36
 
 STATUS_TEXT_X = 225
-STATUS_TEXT_Y = 505
+STATUS_TEXT_Y = 550
 
 # Preset section layout
-PRESET_DIVIDER_Y = 510
+PRESET_DIVIDER_Y = 555
 PRESET_DIVIDER_LEFT = 20
 PRESET_DIVIDER_RIGHT = 430
 
 PRESET_HEADER_X = 20
-PRESET_HEADER_Y = 530
+PRESET_HEADER_Y = 575
 
-PRESET_Y = 565
+PRESET_Y = 610
 PRESET_HEIGHT = 35
 
 PRESET_INPUT_X = 40
@@ -179,8 +195,8 @@ BLACK_TEXT = (0, 0, 0)
 
 # Preset list layout
 PRESET_LIST_HEADER_X = 20
-PRESET_LIST_HEADER_Y = 625
-PRESET_LIST_Y_OFFSET = 660
+PRESET_LIST_HEADER_Y = 670
+PRESET_LIST_Y_OFFSET = 705
 
 PRESET_ROW_X = 30
 PRESET_ROW_WIDTH = 390
@@ -456,6 +472,9 @@ class PygameUI:
         # Track scale changes
         self._scale_changed = False
         self._original_scale = self.l.global_scale
+
+        # FPS dropdown menu state.
+        self._fps_menu_open = False
 
         logger.info("PygameUI initialization complete")
 
@@ -752,6 +771,53 @@ class PygameUI:
                 self.colors["bot"], "by"
             )
 
+            # FPS selector. Click opens a small popup with each
+            # allowed FPS value; pick one to set, or click outside to
+            # dismiss. The dropdown itself is rendered LAST in this
+            # method so it stacks on top of everything else.
+            fps_btn = pygame.Rect(
+                FPS_BUTTON_X, FPS_BUTTON_Y, FPS_BUTTON_WIDTH, FPS_BUTTON_HEIGHT
+            )
+            fps_hover = fps_btn.collidepoint(mx, my)
+            current_fps = getattr(self.l, "max_fps", 60)
+            fps_face = (
+                self.colors["accent"] if self._fps_menu_open
+                else (self.colors["border"] if fps_hover else self.colors["panel"])
+            )
+            fps_text_color = WHITE_TEXT if self._fps_menu_open else self.colors["text"]
+            pygame.draw.rect(self.screen, fps_face, fps_btn, border_radius=PRESET_BORDER_RADIUS)
+            fps_text = self.font_md.render(f"FPS: {current_fps}  v", True, fps_text_color)
+            self.screen.blit(fps_text, fps_text.get_rect(center=fps_btn.center))
+
+            if fps_hover and m_click and not self.m_locked and not self.dragging:
+                self.pressed_button = "fps"
+            if not m_click and self.pressed_button == "fps":
+                if fps_hover:
+                    self._fps_menu_open = not self._fps_menu_open
+                self.pressed_button = None
+
+            # RESTART button - hard restart of the whole app so global
+            # scale and FPS changes take effect cleanly.
+            restart_btn = pygame.Rect(
+                RESTART_BUTTON_X, RESTART_BUTTON_Y,
+                RESTART_BUTTON_WIDTH, RESTART_BUTTON_HEIGHT,
+            )
+            restart_hover = restart_btn.collidepoint(mx, my)
+            r_face = self.colors["warning"] if restart_hover else hex_to_rgb("#c87a0e")
+            pygame.draw.rect(self.screen, r_face, restart_btn, border_radius=PRESET_BORDER_RADIUS)
+            r_text = self.font_md.render("RESTART", True, BLACK_TEXT)
+            self.screen.blit(r_text, r_text.get_rect(center=restart_btn.center))
+
+            if restart_hover and m_click and not self.m_locked and not self.dragging:
+                self.pressed_button = "restart"
+            if not m_click and self.pressed_button == "restart":
+                if restart_hover and hasattr(self.l, "restart_app"):
+                    logger.info("Restart button clicked")
+                    self.show_status("Restarting...", "info", duration=0.5)
+                    pygame.display.flip()
+                    self.l.restart_app()
+                self.pressed_button = None
+
             # Undock/Dock Button
             undock_btn = pygame.Rect(UNDOCK_BUTTON_X, UNDOCK_BUTTON_Y, UNDOCK_BUTTON_WIDTH, UNDOCK_BUTTON_HEIGHT)
             u_hover = undock_btn.collidepoint(mx, my)
@@ -997,6 +1063,81 @@ class PygameUI:
                         )
                         self.show_status("Failed to save preset", "error")
                         self.m_locked = True
+
+            # FPS dropdown overlay. Drawn LAST so it visually stacks
+            # on top of any other widget that happens to sit below
+            # the FPS button. Also intercepts mouse so a stray click
+            # outside any item just closes the menu.
+            if self._fps_menu_open:
+                try:
+                    from src.launcher import ALLOWED_FPS_VALUES
+                except Exception:
+                    ALLOWED_FPS_VALUES = (30, 60, 90, 120)
+
+                menu_x = FPS_BUTTON_X
+                menu_y = FPS_BUTTON_Y + FPS_BUTTON_HEIGHT + 2
+                item_h = FPS_MENU_ITEM_HEIGHT
+                pad = FPS_MENU_PADDING
+                menu_w = FPS_BUTTON_WIDTH
+                menu_h = pad * 2 + item_h * len(ALLOWED_FPS_VALUES)
+                menu_rect = pygame.Rect(menu_x, menu_y, menu_w, menu_h)
+
+                # Drop shadow + filled menu
+                shadow = pygame.Rect(menu_x + 2, menu_y + 4, menu_w, menu_h)
+                pygame.draw.rect(self.screen, (0, 0, 0), shadow,
+                                 border_radius=PRESET_BORDER_RADIUS)
+                pygame.draw.rect(self.screen, self.colors["panel"], menu_rect,
+                                 border_radius=PRESET_BORDER_RADIUS)
+                pygame.draw.rect(self.screen, self.colors["border"], menu_rect, 1,
+                                 border_radius=PRESET_BORDER_RADIUS)
+
+                clicked_in_item = False
+                for i, fps_val in enumerate(ALLOWED_FPS_VALUES):
+                    item_rect = pygame.Rect(
+                        menu_x + pad,
+                        menu_y + pad + i * item_h,
+                        menu_w - pad * 2,
+                        item_h,
+                    )
+                    item_hover = item_rect.collidepoint(mx, my)
+                    is_current = (fps_val == current_fps)
+                    if is_current:
+                        face = self.colors["accent"]
+                        txt_color = WHITE_TEXT
+                    elif item_hover:
+                        face = self.colors["border"]
+                        txt_color = self.colors["text"]
+                    else:
+                        face = self.colors["panel"]
+                        txt_color = self.colors["text"]
+                    pygame.draw.rect(self.screen, face, item_rect, border_radius=3)
+                    label = f"{fps_val} FPS"
+                    if is_current:
+                        label += "  *"
+                    item_text = self.font_md.render(label, True, txt_color)
+                    self.screen.blit(item_text, item_text.get_rect(center=item_rect.center))
+
+                    if item_hover and m_click and not self.m_locked and not self.dragging:
+                        self.pressed_button = f"fps_item_{fps_val}"
+                    if not m_click and self.pressed_button == f"fps_item_{fps_val}":
+                        if item_hover:
+                            if hasattr(self.l, "set_max_fps"):
+                                self.l.set_max_fps(fps_val)
+                            self.show_status(
+                                f"FPS set to {fps_val} (click RESTART to apply)", "info",
+                            )
+                            self._fps_menu_open = False
+                            clicked_in_item = True
+                        self.pressed_button = None
+
+                # Click somewhere off-menu (and not on the FPS button itself)
+                # closes the menu without changing anything.
+                if (not clicked_in_item
+                        and m_click and not self.m_locked
+                        and not menu_rect.collidepoint(mx, my)
+                        and not fps_btn.collidepoint(mx, my)
+                        and self.pressed_button is None):
+                    self._fps_menu_open = False
 
             # Release mouse lock
             if not m_click:

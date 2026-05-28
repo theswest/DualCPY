@@ -69,6 +69,10 @@ BOTTOM_SCREEN_DEFAULT_X = 0
 BOTTOM_SCREEN_DEFAULT_Y = 0
 DEFAULT_GLOBAL_SCALE = 0.6
 
+# Allowed scrcpy FPS values exposed in the control panel.
+ALLOWED_FPS_VALUES = (30, 60, 90, 120)
+DEFAULT_MAX_FPS = 60
+
 # Container window initial position
 DEFAULT_CONTAINER_X = 100
 DEFAULT_CONTAINER_Y = 100
@@ -118,8 +122,15 @@ class Launcher:
         )
         self.launch_scale = self.global_scale
 
-        # Initialize Scrcpy with the saved scale
-        self.scrcpy = ScrcpyManager(scale=self.launch_scale)
+        # Save max FPS to config and use the fps
+        try:
+            cfg_fps = int(self.config.get("max_fps", DEFAULT_MAX_FPS))
+        except (TypeError, ValueError):
+            cfg_fps = DEFAULT_MAX_FPS
+        self.max_fps = cfg_fps if cfg_fps in ALLOWED_FPS_VALUES else DEFAULT_MAX_FPS
+
+        # Initialize Scrcpy with the saved scale and FPS
+        self.scrcpy = ScrcpyManager(scale=self.launch_scale, max_fps=self.max_fps)
 
         # Calculate the forced layout (Top at 0,0 - bottom centred underneath) with scaled dimensions
         w1, h1 = self.scrcpy.f_w1, self.scrcpy.f_h1
@@ -162,6 +173,12 @@ class Launcher:
         except Exception as ArgtypeError:
             logger.error(f"Error when defining window argtypes: {ArgtypeError}")
             pass
+
+        # Make sure GDI signatures are wide enough for 64-bit handles.
+        try:
+            self._setup_gdi_signatures()
+        except Exception as GdiArgtypeError:
+            logger.error(f"Error when defining GDI argtypes: {GdiArgtypeError}")
 
     def save_layout(self):
         """
@@ -237,6 +254,110 @@ class Launcher:
             return self.user32.DefWindowProcW(hwnd, msg, wp, lp)
 
         return WNDPROC(py_wndproc)
+
+    def _setup_gdi_signatures(self):
+        """
+        Tell ctypes the proper signatures for the GDI functions we
+        invoke. Without this, ctypes defaults arguments to c_int and
+        returns int, which truncates 64-bit Windows HANDLE/HBITMAP/HDC
+        values once the OS hands us addresses above 2^31.
+
+        Safe to call multiple times - argtypes assignment is idempotent.
+        """
+        gdi32 = ctypes.windll.gdi32
+        gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
+        gdi32.SelectObject.restype = wintypes.HGDIOBJ
+        gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
+        gdi32.CreateCompatibleDC.restype = wintypes.HDC
+        gdi32.DeleteDC.argtypes = [wintypes.HDC]
+        gdi32.DeleteDC.restype = wintypes.BOOL
+        gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+        gdi32.DeleteObject.restype = wintypes.BOOL
+        gdi32.BitBlt.argtypes = [
+            wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.DWORD,
+        ]
+        gdi32.BitBlt.restype = wintypes.BOOL
+        # Stock-object lookup + FillRect handles need 64-bit-safe
+        # signatures or the BUTTONS=OFF black-fill silently no-ops.
+        gdi32.GetStockObject.argtypes = [ctypes.c_int]
+        gdi32.GetStockObject.restype = wintypes.HGDIOBJ
+        self.user32.FillRect.argtypes = [
+            wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.HBRUSH,
+        ]
+        self.user32.FillRect.restype = ctypes.c_int
+        self.user32.UpdateWindow.argtypes = [wintypes.HWND]
+        self.user32.UpdateWindow.restype = wintypes.BOOL
+
+    def cycle_max_fps(self):
+        """
+        Cycle through the allowed FPS presets (30 -> 60 -> 120 -> 30).
+        Persists to config. Takes effect on the next scrcpy restart;
+        the user is expected to click RESTART afterwards.
+        """
+        try:
+            idx = ALLOWED_FPS_VALUES.index(self.max_fps)
+        except ValueError:
+            idx = ALLOWED_FPS_VALUES.index(DEFAULT_MAX_FPS)
+        new_fps = ALLOWED_FPS_VALUES[(idx + 1) % len(ALLOWED_FPS_VALUES)]
+        self.set_max_fps(new_fps)
+        return new_fps
+
+    def set_max_fps(self, fps):
+        """Set the FPS cap and persist; restart required to take effect."""
+        if fps not in ALLOWED_FPS_VALUES:
+            logger.warning(f"Ignoring out-of-range FPS request: {fps}")
+            return
+        logger.info(f"FPS preference changed: {self.max_fps} -> {fps}")
+        self.max_fps = fps
+        try:
+            self.config.set("max_fps", fps)
+        except Exception as FpsSaveError:
+            logger.warning(f"Failed to persist max_fps: {FpsSaveError}")
+        # Update the live ScrcpyManager so a restart picks it up.
+        if hasattr(self, "scrcpy"):
+            self.scrcpy.max_fps = fps
+
+    def restart_app(self):
+        """
+        Restart the entire application. Spawns a fresh main.py (or
+        the bundled exe under PyInstaller) and exits this process.
+        Used by the control panel after global-scale or FPS changes.
+
+        IMPORTANT: in onefile PyInstaller mode, the parent process
+        sets `_MEIPASS2` in its environment so child invocations of
+        the same exe re-use the parent's already-extracted bundle
+        folder. That's the wrong behaviour here - the parent is
+        about to exit and tear down its `_MEI...` folder, which
+        would yank `adb.exe` and `scrcpy.exe` out from under the
+        child. We scrub PyInstaller's bootloader env vars from the
+        child's environment so it creates its own fresh extraction.
+        """
+        import subprocess
+        import sys
+        try:
+            if getattr(sys, "frozen", False):
+                cmd = [sys.executable]
+            else:
+                cmd = [sys.executable, "main.py"]
+
+            child_env = os.environ.copy()
+            for key in (
+                "_MEIPASS2",
+                "_PYI_APPLICATION_HOME_DIR",
+                "_PYI_PARENT_PROCESS_LEVEL",
+                "_PYI_SPLASH_IPC",
+            ):
+                child_env.pop(key, None)
+
+            logger.info(f"Restarting application: {' '.join(cmd)}")
+            subprocess.Popen(cmd, cwd=os.getcwd(), env=child_env)
+        except Exception as RestartSpawnError:
+            logger.error(f"Failed to spawn restart process: {RestartSpawnError}",
+                         exc_info=True)
+            return
+        # Now tear ourselves down (this calls os._exit(0) at the end).
+        self.stop()
 
     def _create_container_window(self):
         """
