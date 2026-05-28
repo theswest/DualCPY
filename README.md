@@ -73,7 +73,7 @@ Technical Features:
 ## Bundled Software:
 
 ThorCPY includes the following third-party software:
-- **scrcpy v3.3.4** by Genymobile/Romain Vimont
+- **scrcpy v4.0** by Genymobile/Romain Vimont
 - Licensed under Apache License 2.0
 - See `bin/LICENSE_scrcpy.txt` for full license text
 - Source: https://github.com/Genymobile/scrcpy

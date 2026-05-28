@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 - [Addtimestamp]
+### Added
+- Update bundled scrcpy version to scrcpy 4.0
+### Bugfixes
+- Fixed issue where bottom screen displays incorrectly, causing non-transparency with screenshots
+
+
 ## 0.3.0 - 15-02-2026
 ### Added
 - Added Wireless Support
