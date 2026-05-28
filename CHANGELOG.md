@@ -11,9 +11,12 @@
 - Improve scrcpy window launch commands (@tommywaaf)
 - Only redraw screens when changes occur (@tommywaaf)
 - Only calls for windows to be docked when necessary (@tommywaaf) 
-- Allow users to resize and move undocked windows (@tommywaaf) with correct rendering sizing and scale (@theswest)
-- Build bundled as onedir rather than onefile to improve launch speed in subsequent runs
-- Increase process priority
+- Allow users to resize and move undocked windows by giving them title bars (@tommywaaf)
+- Launching undocked windows with correct rendering sizing and scale (@theswest)
+- Build bundled as onedir rather than onefile to improve launch speed in subsequent runs (@tommywaaf) 
+- Increase process priority (@tommywaaf) 
+- Added fps config into settings (@tommywaaf) 
+- Added restart button into settings (@tommywaaf) 
 
 
 ## 0.3.0 - 15-02-2026
