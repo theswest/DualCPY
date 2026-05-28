@@ -4,7 +4,11 @@
 ### Added
 - Update bundled scrcpy version to scrcpy 4.0
 ### Bugfixes
-- Fixed issue where bottom screen displays incorrectly, causing non-transparency with screenshots
+- Improved launch codec and paramaters (@tommywaaf)
+- Improved bundled binary location (@tommywaaf)
+- More resistant adb server retry logic (@tommywaaf)
+- Improved video codec options (@tommywaaf)
+- Improve scrcpy window launch commands (@tommywaaf)
 
 
 ## 0.3.0 - 15-02-2026
