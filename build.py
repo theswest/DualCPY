@@ -22,7 +22,7 @@ import PyInstaller.__main__
 PyInstaller.__main__.run(
     [
         "main.py",
-        "--onefile",
+        "--onedir",
         "--noconsole",
         "--clean",
         "--name=ThorCPY",
@@ -32,5 +32,6 @@ PyInstaller.__main__.run(
         "--add-data=assets/fonts;assets/fonts",
         "--add-data=assets/icon.png;assets",
         "--icon=assets/icon.ico",
+        "-y",
     ]
 )

@@ -17,7 +17,7 @@
 
 # main.py
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __app_name__ = "ThorCPY"
 __author__ = "the_swest"
 __description__ = "AYN Thor screen mirroring and docking tool"
@@ -126,21 +126,37 @@ def check_runtime_structure():
     """
     logger = logging.getLogger(__name__)
 
-    # Path logic for pyinstaller exe files
-    if hasattr(sys, "_MEIPASS"):
+    is_frozen = hasattr(sys, "_MEIPASS")
+    if is_frozen:
         base = os.path.dirname(sys.executable)
     else:
         base = os.path.dirname(os.path.abspath(__file__))
 
-    # List the missing files and return an error
+    # When frozen, transparently create the writable folders next to
+    # the executable and skip the bin/ check (it lives in _MEIPASS).
+    if is_frozen:
+        for folder in ("config", "logs"):
+            try:
+                os.makedirs(os.path.join(base, folder), exist_ok=True)
+            except Exception as MkdirError:
+                logger.warning(
+                    f"Could not create runtime folder '{folder}': {MkdirError}"
+                )
+        logger.debug(
+            f"Frozen runtime: bin/ resolves from _MEIPASS={sys._MEIPASS}; "
+            f"config/ and logs/ ensured next to {sys.executable}"
+        )
+        return
+
+    # From-source path: hard fail if anything is missing.
     missing = [f for f in REQUIRED_FOLDERS if not os.path.isdir(os.path.join(base, f))]
 
     if missing:
         msg = (
-            f"ThorCPY failed to start.\n\n"
+            f"{__app_name__} failed to start.\n\n"
             f"Missing required folders:\n"
             f"{', '.join(missing)}\n\n"
-            f"ThorCPY must be installed with:\n"
+            f"{__app_name__} must be installed with:\n"
             f"bin/, config/, logs/\n\n"
             f"Please reinstall or extract the full build."
         )
@@ -148,7 +164,7 @@ def check_runtime_structure():
         # Log error and show fatal error, also print to console
         logger.critical(msg)
         print(msg)
-        show_fatal_error("ThorCPY Startup Error", msg)
+        show_fatal_error(f"{__app_name__} Startup Error", msg)
         sys.exit(1)
 
 
@@ -160,6 +176,17 @@ def main():
     """
     print(f"Starting {__app_name__} v{__version__}")
     print("Checking system requirements...")
+
+    # When packaged as a PyInstaller exe, the working directory may
+    # be wherever the user double-clicked from (their Desktop, etc).
+    # Anchor all relative paths (config/, logs/) to the exe's own
+    # directory so the app behaves predictably regardless of how it
+    # was launched.
+    if getattr(sys, "frozen", False):
+        try:
+            os.chdir(os.path.dirname(sys.executable))
+        except Exception:
+            pass
 
     # Sets up logging before anything else
     setup_logging()
@@ -179,6 +206,31 @@ def main():
         logger.info("DPI Awareness set successfully")
     except Exception as DpiAwareErr:
         logger.error(f"Could not set DPI Awareness: {DpiAwareErr}")
+
+    # Bump our own process priority to ABOVE_NORMAL_PRIORITY_CLASS.
+    # The two scrcpy children run at HIGH (set in scrcpy_manager) so
+    # we stay below them and don't risk starving the encoder/decoder,
+    # but we sit ABOVE the swarm of NORMAL-priority background apps
+    # (Discord, browsers, IDEs, game launchers) that would otherwise
+    # share CPU with our message pump and chassis renderer. That
+    # sharing is the source of the residual sub-frame audio hiccups.
+    try:
+        from ctypes import wintypes
+        ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000
+        kernel32 = ctypes.windll.kernel32
+        # 64-bit pseudo-handle from GetCurrentProcess() must NOT be
+        # truncated to 32-bit int by ctypes' default signature.
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.SetPriorityClass.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.SetPriorityClass.restype = wintypes.BOOL
+        current = kernel32.GetCurrentProcess()
+        if kernel32.SetPriorityClass(current, ABOVE_NORMAL_PRIORITY_CLASS):
+            logger.info("Host process priority -> ABOVE_NORMAL")
+        else:
+            err = kernel32.GetLastError()
+            logger.warning(f"SetPriorityClass(ABOVE_NORMAL) failed (GetLastError={err})")
+    except Exception as PriorityErr:
+        logger.warning(f"Could not raise host process priority: {PriorityErr}")
 
     # Create the main launcher object and start it
     logger.info("Initializing launcher")
