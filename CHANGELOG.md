@@ -9,6 +9,9 @@
 - More resistant adb server retry logic (@tommywaaf)
 - Improved video codec options (@tommywaaf)
 - Improve scrcpy window launch commands (@tommywaaf)
+- Only redraw screens when changes occur (@tommywaaf)
+- Only calls for windows to be docked when necessary (@tommywaaf) 
+- Allow users to resize and move undocked windows (@tommywaaf) with correct rendering scale (@theswest)
 
 
 ## 0.3.0 - 15-02-2026
