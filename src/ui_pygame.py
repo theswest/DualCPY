@@ -423,6 +423,13 @@ class PygameUI:
             "warning": hex_to_rgb(WARNING_HEX),
         }
 
+        try:
+            raw_logo = pygame.image.load(ICON_PATH).convert_alpha()
+            self.title_logo = pygame.transform.smoothscale(raw_logo, (40, 40))
+        except Exception as TitleLogoError:
+            logger.warning(f"Failed to prep title logo: {TitleLogoError}")
+            self.title_logo = None
+
         # Slider interaction
         self.dragging = None  # Currently dragged slider
         self.m_locked = False  # If mouse has been released

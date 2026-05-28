@@ -370,6 +370,7 @@ class Launcher:
                 apply_undocked_style(self.dock.hwnd_bottom)
                 self.user32.ShowWindow(self.hwnd_container, SW_HIDE)
 
+                self.dock.invalidate_geom_cache()
                 logger.info("Windows undocked successfully")
             else:
                 # Dock windows in a container
@@ -392,6 +393,7 @@ class Launcher:
                 self.user32.SetParent(self.dock.hwnd_bottom, self.hwnd_container)
                 apply_docked_style(self.dock.hwnd_top)
                 apply_docked_style(self.dock.hwnd_bottom)
+                self.dock.invalidate_geom_cache()
                 self.docked = True
 
                 logger.info("Windows docked successfully")
