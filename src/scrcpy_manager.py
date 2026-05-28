@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 
 # Process creation flags and prevent console window from appearing
 CREATE_NO_WINDOW = 0x08000000
+# HIGH_PRIORITY_CLASS keeps scrcpy from being descheduled under load.
+# Important for sustained smoothness when the host CPU has other work.
+HIGH_PRIORITY_CLASS = 0x00000080
+SCRCPY_CREATION_FLAGS = CREATE_NO_WINDOW | HIGH_PRIORITY_CLASS
 
 # Default UI scaling
 DEFAULT_UI_SCALING = 0.6
@@ -49,10 +53,11 @@ SCRCPY_START_DELAY = 1.0
 
 # ADB command timeouts
 ADB_CAPTURE_OUTPUT = True
-ADB_SERVER_TIMEOUT = 10
+ADB_SERVER_TIMEOUT = 30
 ADB_TASKKILL_TIMEOUT = 5
 ADB_TCPIP_TIMEOUT = 10
 ADB_CONNECT_TIMEOUT = 10
+ADB_SERVER_START_RETRIES = 2
 
 # Logging constants
 LOG_MULT = 60
@@ -60,14 +65,15 @@ LOGFILE_ENCODING = "utf-8"
 
 # Scrcpy default parameters
 DEFAULT_MAX_FPS = "120"
-DEFAULT_RENDER_DRIVER = "opengl"
+DEFAULT_RENDER_DRIVER = "direct3d11"
+DEFAULT_VIDEO_CODEC = "h264"
 
 # Video bitrate calculation constants
-BITRATE_CALC_SCALE_FACTOR = 1.5
-TOP_BITRATE_MINIMUM = 8
-TOP_BITRATE_SCALE = 32
+BITRATE_CALC_SCALE_FACTOR = 2.0
+TOP_BITRATE_MINIMUM = 12
+TOP_BITRATE_SCALE = 24
 BOTTOM_BITRATE_MINIMUM = 6
-BOTTOM_BITRATE_SCALE = 24
+BOTTOM_BITRATE_SCALE = 18
 
 # AYN Thor Screen Constants
 TOP_SCREEN_DISPLAY_ID = "0"
@@ -142,23 +148,50 @@ class ScrcpyManager:
 
     def _resolve_bin(self, name):
         """
-        Finds binary in local ./bin folder or system path.
+        Locate a bundled binary (scrcpy / adb).
+
+        Search order:
+          1. PyInstaller bundle (sys._MEIPASS/bin/) when running as a
+             frozen exe - this is what makes the standalone .exe work
+             without the user copying bin/ next to it.
+          2. ./bin next to the running script or exe.
+          3. The current working directory's bin/.
+          4. System PATH.
         """
+        import sys
         logger.debug(f"Resolving binary: {name}")
 
-        # Check local bin folder first
-        local = os.path.join(os.getcwd(), "bin", f"{name}.exe")
-        if os.path.exists(local):
-            logger.info(f"Found {name} in local bin folder: {local}")
-            return local
+        candidates = []
 
-        # Fallback to system PATH
+        # 1) PyInstaller _MEIPASS unpacked bundle
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(os.path.join(meipass, "bin", f"{name}.exe"))
+
+        # 2) ./bin next to the script/exe
+        if getattr(sys, "frozen", False):
+            exe_dir = os.path.dirname(sys.executable)
+        else:
+            exe_dir = os.path.dirname(os.path.abspath(__file__))
+            # src/ -> project root
+            exe_dir = os.path.dirname(exe_dir)
+        candidates.append(os.path.join(exe_dir, "bin", f"{name}.exe"))
+
+        # 3) cwd
+        candidates.append(os.path.join(os.getcwd(), "bin", f"{name}.exe"))
+
+        for path in candidates:
+            if os.path.exists(path):
+                logger.info(f"Found {name} at: {path}")
+                return path
+
+        # 4) system PATH
         found = shutil.which(name)
         if found:
             logger.info(f"Found {name} in system PATH: {found}")
             return found
 
-        logger.warning(f"Binary '{name}' not found in local bin or system PATH")
+        logger.warning(f"Binary '{name}' not found (checked: {candidates})")
         return None
 
     def _is_wireless_serial(self, serial):
@@ -186,25 +219,38 @@ class ScrcpyManager:
             logger.error("Cannot detect device: ADB binary not found")
             return None
 
-        # Start ADB server
-        try:
-            logger.debug("Starting ADB server")
-            result = subprocess.run(
-                [self.adb_bin, "start-server"],
-                capture_output=ADB_CAPTURE_OUTPUT,
-                text=True,
-                timeout=ADB_SERVER_TIMEOUT,
-            )
-            if result.returncode != 0:
-                logger.warning(f"ADB start-server returned code {result.returncode}")
-            else:
-                logger.debug("ADB server started successfully")
-        except subprocess.TimeoutExpired:
-            logger.error("ADB server start timeout")
+        # Start ADB server (with one retry - the first launch on a
+        # freshly-downloaded build can be delayed by Defender's
+        # Mark-of-the-Web scan; the second attempt is virtually
+        # instant once the binary is scan-cached).
+        started = False
+        last_error = None
+        for attempt in range(1, ADB_SERVER_START_RETRIES + 1):
+            try:
+                logger.debug(f"Starting ADB server (attempt {attempt}/{ADB_SERVER_START_RETRIES})")
+                result = subprocess.run(
+                    [self.adb_bin, "start-server"],
+                    capture_output=ADB_CAPTURE_OUTPUT,
+                    text=True,
+                    timeout=ADB_SERVER_TIMEOUT,
+                )
+                if result.returncode != 0:
+                    logger.warning(f"ADB start-server returned code {result.returncode}")
+                started = True
+                break
+            except subprocess.TimeoutExpired as TimeoutErr:
+                last_error = TimeoutErr
+                logger.warning(
+                    f"ADB server start timed out (attempt {attempt}/{ADB_SERVER_START_RETRIES}); "
+                    f"likely Defender scanning a freshly-downloaded binary - retrying"
+                )
+            except Exception as AdbServerStartError:
+                last_error = AdbServerStartError
+                logger.error(f"Failed to start ADB server (attempt {attempt}): {AdbServerStartError}")
+        if not started:
+            logger.error(f"ADB server failed to start after {ADB_SERVER_START_RETRIES} attempts: {last_error}")
             return None
-        except Exception as AdbServerStartError:
-            logger.error(f"Failed to start ADB server: {AdbServerStartError}")
-            return None
+        logger.debug("ADB server started successfully")
 
         # Get list of devices
         try:
@@ -560,7 +606,18 @@ class ScrcpyManager:
         bitrate_str = f"{bitrate_mbps}M"
         logger.debug(f"{label} bitrate: {bitrate_str}")
 
-        # Build command
+        # Build command and codec options
+
+        codec_options = (
+            "low-latency=1,"
+            "priority=0,"
+            "operating-rate=120,"
+            "bitrate-mode=2,"
+            "complexity=0,"
+            "i-frame-interval=10,"
+            "intra-refresh-period=60"
+        )
+
         cmd = [
             self.scrcpy_bin,
             "--serial", serial,
@@ -570,6 +627,9 @@ class ScrcpyManager:
             "--video-bit-rate", bitrate_str,
             "--max-fps", DEFAULT_MAX_FPS,
             "--render-driver", DEFAULT_RENDER_DRIVER,
+            "--video-codec", DEFAULT_VIDEO_CODEC,
+            "--video-encoder=c2.qti.avc.encoder",
+            f"--video-codec-options={codec_options}",
         ]
 
         # Audio settings
@@ -586,11 +646,66 @@ class ScrcpyManager:
             try:
                 logger.info(f"Starting {label} (attempt {attempt}/{self.scrcpy_retry_count})")
 
+                # IMPORTANT: NEVER use subprocess.PIPE here without a
+                # drain thread - scrcpy's stdout/stderr fill the OS
+                # pipe buffer (~64 KB on Windows) within seconds, then
+                # scrcpy blocks on its next write and the stream stalls.
+                #
+                # Instead we hand scrcpy a real file handle. The OS
+                # writes lazily to disk so there is no buffer-fill
+                # deadlock, and we get scrcpy's --print-fps output in
+                # a per-instance log file we can tail live with
+                # `Get-Content -Wait logs\scrcpy_<role>_*.log` to see
+                # the actual on-screen FPS.
+                role = "top" if "Top" in window_title else "bottom"
+                ts = time.strftime("%Y%m%d_%H%M%S")
+                log_dir = "logs"
+                try:
+                    os.makedirs(log_dir, exist_ok=True)
+                except Exception:
+                    pass
+                log_path = os.path.join(log_dir, f"scrcpy_{role}_{ts}.log")
+                try:
+                    log_handle = open(log_path, "wb", buffering=0)
+                    self._scrcpy_log_handles.append(log_handle)
+                    stdout_target = log_handle
+                    stderr_target = subprocess.STDOUT
+                    logger.info(f"Scrcpy {role} output -> {log_path}")
+                except Exception as ScrcpyLogOpenError:
+                    logger.warning(
+                        f"Could not open scrcpy log file '{log_path}': "
+                        f"{ScrcpyLogOpenError} - falling back to DEVNULL"
+                    )
+                    stdout_target = subprocess.DEVNULL
+                    stderr_target = subprocess.DEVNULL
+
+                # Disable SDL2's vsync wait inside scrcpy. With vsync
+                # ON, SDL_RenderPresent blocks until the next monitor
+                # refresh - on high-refresh-rate monitors (e.g. 144 /
+                # 165 / 240 Hz) the timing slots don't align with the
+                # 60 Hz incoming frame stream, and scrcpy ends up
+                # skipping frames. Setting SDL_RENDER_VSYNC=0 makes
+                # the renderer present every decoded frame as soon as
+                # it arrives - the small chance of tearing on a
+                # 200+ Hz panel is essentially invisible.
+                child_env = os.environ.copy()
+                child_env["SDL_RENDER_VSYNC"] = "0"
+                # Strip PyInstaller bootloader env vars so a frozen-
+                # parent's _MEIPASS isn't inherited by scrcpy.
+                for _k in (
+                    "_MEIPASS2",
+                    "_PYI_APPLICATION_HOME_DIR",
+                    "_PYI_PARENT_PROCESS_LEVEL",
+                    "_PYI_SPLASH_IPC",
+                ):
+                    child_env.pop(_k, None)
+
                 proc = subprocess.Popen(
                     cmd,
-                    creationflags=CREATE_NO_WINDOW,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    creationflags=SCRCPY_CREATION_FLAGS,
+                    stdout=stdout_target,
+                    stderr=stderr_target,
+                    env=child_env,
                 )
 
                 # Quick check if process survives startup
