@@ -22,7 +22,6 @@ import time
 import ctypes
 import tkinter as tk
 from tkinter import messagebox
-import pygame
 import os
 import logging
 from ctypes import wintypes
@@ -31,7 +30,7 @@ from src.scrcpy_manager import ScrcpyManager
 from src.win32_dock import Win32Dock, apply_docked_style, apply_undocked_style
 from src.presets import PresetStore
 from src.config import ConfigManager
-from src.ui_pygame import show_loading_screen, PygameUI
+from src.ui_ctk import show_loading_screen, CTkUI
 from src.win32_darkmode import enable_dark_titlebar
 from src.wireless_dialog import show_wireless_dialog
 
@@ -138,9 +137,10 @@ class Launcher:
         self.by = None
         self.global_scale = None
 
-        # Single persistent tkinter root so all dialogs use it as their parent without corrupting control window's state
-        self._tk_root = tk.Tk()
-        self._tk_root.withdraw()
+        # _tk_root starts as None; it is set to self.ui.window once the CTK
+        # UI is created in launch(), giving dialogs a proper parent.
+        # Pre-launch dialogs (messagebox, wireless setup) work without a parent.
+        self._tk_root = None
 
         # Initialise window management
         self.dock = Win32Dock()
@@ -522,23 +522,16 @@ class Launcher:
 
     def show_connection_dialog(self):
         """
-        Shows the wireless connection dialog
-        Hides the scrcpy container and pygame control panel first so their
-        Win32 handles don't conflict with the tkinter dialog grab, then
-        restores them when the dialog closes
+        Shows the wireless connection dialog.
+        Hides the scrcpy container window first so it doesn't conflict with
+        the dialog grab, then restores it when the dialog closes.
+
+        The CTK control panel window is hidden/restored by the _on_wireless
+        callback in CTkUI before/after this method is called.
         """
-        logger.info("Opening wireless connection dialog — hiding scrcpy windows")
+        logger.info("Opening wireless connection dialog — hiding scrcpy container")
 
-        # Hide pygame control panel
-        try:
-            info = pygame.display.get_wm_info()
-            hwnd_pygame = info.get("window")
-            if hwnd_pygame:
-                self.user32.ShowWindow(hwnd_pygame, SW_HIDE)
-        except Exception as HidePygameError:
-            logger.warning(f"Could not hide pygame window: {HidePygameError}")
-
-        # Hide scrcpy container and child windows
+        # Hide scrcpy container
         if self.hwnd_container:
             self.user32.ShowWindow(self.hwnd_container, SW_HIDE)
 
@@ -564,20 +557,9 @@ class Launcher:
             return None
 
         finally:
-            logger.info("Wireless dialog closed — restoring scrcpy windows")
-            # Restore scrcpy container
+            logger.info("Wireless dialog closed — restoring scrcpy container")
             if self.hwnd_container:
                 self.user32.ShowWindow(self.hwnd_container, SW_SHOW)
-
-            # Restore pygame control panel
-            try:
-                info = pygame.display.get_wm_info()
-                hwnd_pygame = info.get("window")
-                if hwnd_pygame:
-                    self.user32.ShowWindow(hwnd_pygame, SW_SHOW)
-                    self.user32.SetForegroundWindow(hwnd_pygame)
-            except Exception as ShowPygameError:
-                logger.warning(f"Could not restore pygame window: {ShowPygameError}")
 
     def launch(self):
         self.running = True
@@ -655,58 +637,46 @@ class Launcher:
         self._create_container_window()
         threading.Thread(target=self._docking_monitor, daemon=True).start()
 
-        # Init UI and event loop
+        # Create CTK control panel.  The window starts hidden; deiconify()
+        # is called inside CTkUI.__init__ after all widgets are built.
+        # We also stash the CTK window as _tk_root so post-launch dialogs
+        # (e.g. the wireless dialog) have a proper parent window.
+        self.ui = CTkUI(self)
+        self._tk_root = self.ui.window
 
-
-        pygame.init()
-        self.ui = PygameUI(self)
-        clock = pygame.time.Clock()
-
-        while self.running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.stop()
-                self.ui.handle_event(event)
-
-            if self.dock.hwnd_top or self.dock.hwnd_bottom:
-                self.dock.sync(
-                    self.tx,
-                    self.ty,
-                    self.bx,
-                    self.by,
-                    self.scrcpy.f_w1,
-                    self.scrcpy.f_h1,
-                    self.scrcpy.f_w2,
-                    self.scrcpy.f_h2,
-                    is_docked=self.docked,
-                )
-            self.ui.render()
-            clock.tick(UI_FPS)
+        # Block here until the window is closed (replaces the old pygame loop).
+        # dock.sync() is driven by CTkUI._update_loop() via window.after().
+        self.ui.run()
 
     def stop(self):
         """
-        Cleanly shuts down the application
-        Performs the following actions:
+        Cleanly shuts down the application.
         1) Saves current layout config
         2) Stops all scrcpy processes
-        3) Quits pygame
-        4) Close the container window
-        5) Force exit
+        3) Closes the CTK control panel (stops mainloop)
+        4) Closes the container window
+        5) Force-exits
         """
         if not self.running:
             return
         self.running = False
         self.save_layout()
 
-        # Taskkill the scrcpy
+        # Taskkill the scrcpy processes
         import subprocess
         subprocess.run(
             ["taskkill", "/F", "/IM", "scrcpy.exe", "/T"],
             capture_output=True,
             creationflags=CREATE_NO_WINDOW,
         )
-        # Shutdown Pygame UI and close container window
-        pygame.quit()
+
+        # Stop the CTK main loop (no-ops if UI was never created)
+        try:
+            if hasattr(self, "ui") and self.ui and self.ui.window:
+                self.ui.window.quit()
+        except Exception:
+            pass
+
         if self.hwnd_container:
             self.user32.PostMessageW(self.hwnd_container, WM_CLOSE, 0, 0)
         os._exit(0)

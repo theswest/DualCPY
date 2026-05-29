@@ -1,3 +1,8 @@
 pygame>=2.6.0
 pyinstaller>=6.0.0
 pywin32-ctypes>=0.2.0
+customtkinter>=5.2.2
+dxcam>=0.3.0
+pillow>=12.2.0
+pywin32>=311
+opencv-python>=4.13.0.92

@@ -53,7 +53,7 @@ LOGFILE_ENCODING = "utf-8"
 
 # Scrcpy default parameters
 DEFAULT_MAX_FPS = "60"
-DEFAULT_RENDER_DRIVER = "direct3d11"
+DEFAULT_RENDER_DRIVER = "direct3d"
 DEFAULT_VIDEO_CODEC = "h264"
 
 # Video bitrate calculation constants

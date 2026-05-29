@@ -225,7 +225,7 @@ def main():
         kernel32.SetPriorityClass.restype = wintypes.BOOL
         current = kernel32.GetCurrentProcess()
         if kernel32.SetPriorityClass(current, ABOVE_NORMAL_PRIORITY_CLASS):
-            logger.info("Host process priority -> ABOVE_NORMAL")
+            logger.info("Host process priority set")
         else:
             err = kernel32.GetLastError()
             logger.warning(f"SetPriorityClass(ABOVE_NORMAL) failed (GetLastError={err})")
