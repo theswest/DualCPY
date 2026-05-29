@@ -22,19 +22,21 @@ import time
 import ctypes
 import tkinter as tk
 from tkinter import messagebox
-
 import pygame
 import os
 import logging
 from ctypes import wintypes
 
-from src.scrcpy_manager import ScrcpyManager, TOP_SCREEN_WINDOW_TITLE, BOTTOM_SCREEN_WINDOW_TITLE
+from src.scrcpy_manager import ScrcpyManager
 from src.win32_dock import Win32Dock, apply_docked_style, apply_undocked_style
 from src.presets import PresetStore
 from src.config import ConfigManager
-from src.ui_pygame import show_loading_screen
+from src.ui_pygame import show_loading_screen, PygameUI
 from src.win32_darkmode import enable_dark_titlebar
 from src.wireless_dialog import show_wireless_dialog
+
+from src.device_selector import show_device_selector
+from src.device_profile import BUILTIN_PROFILES
 
 logger = logging.getLogger(__name__)
 
@@ -116,34 +118,25 @@ class Launcher:
         self.store = PresetStore("config/layout.json")
         self.config = ConfigManager("config/config.json")
 
-        # Load scale or use the default
-        self.global_scale = self.config.get(
-            "global_scale", DEFAULT_LAYOUT["global_scale"]
-        )
-        self.launch_scale = self.global_scale
+        # Load scale from config if saved, otherwise let ScrcpyManager fall back to profile
+        saved_scale = self.config.get("global_scale", None)
+        self.launch_scale = saved_scale
 
-        # Save max FPS to config and use the fps
+        # Load max FPS from config
         try:
             cfg_fps = int(self.config.get("max_fps", DEFAULT_MAX_FPS))
         except (TypeError, ValueError):
             cfg_fps = DEFAULT_MAX_FPS
         self.max_fps = cfg_fps if cfg_fps in ALLOWED_FPS_VALUES else DEFAULT_MAX_FPS
 
-        # Initialize Scrcpy with the saved scale and FPS
-        self.scrcpy = ScrcpyManager(scale=self.launch_scale, max_fps=self.max_fps)
-
-        # Calculate the forced layout (Top at 0,0 - bottom centred underneath) with scaled dimensions
-        w1, h1 = self.scrcpy.f_w1, self.scrcpy.f_h1
-        w2, _ = self.scrcpy.f_w2, self.scrcpy.f_h2
-
-        self.tx = TOP_SCREEN_DEFAULT_X
-        self.ty = TOP_SCREEN_DEFAULT_Y
-        self.by = int(h1)
-        self.bx = int(w1 * HALF - w2 * HALF)
-
-        logger.info(
-            f"Layout Reset: Top(0,0), Bottom({self.bx}, {self.by}) at Scale {self.global_scale}"
-        )
+        # Layout attributes — uninitialised until launch() selects a profile and
+        # ScrcpyManager computes the real dimensions.
+        self.scrcpy = None
+        self.tx = None
+        self.ty = None
+        self.bx = None
+        self.by = None
+        self.global_scale = None
 
         # Single persistent tkinter root so all dialogs use it as their parent without corrupting control window's state
         self._tk_root = tk.Tk()
@@ -192,6 +185,7 @@ class Launcher:
             cfg["bx"] = self.bx
             cfg["by"] = self.by
             cfg["global_scale"] = self.global_scale
+            cfg["last_profile"] = self.scrcpy.profile.name
             self.config.save(cfg)
             logger.info(f"Saved configuration (Scale: {self.global_scale})")
         except Exception as SaveConfigError:
@@ -446,6 +440,10 @@ class Launcher:
 
         threading.Thread(target=loop, daemon=True).start()
 
+    @property
+    def _window_titles(self):
+        return self.scrcpy._window_titles()
+
     def _docking_monitor(self):
         """
         Background thread to continuously montor and dock windows.
@@ -455,8 +453,9 @@ class Launcher:
             with self.dock_lock:
                 if self.hwnd_container and self.docked:
                     # Find scrcpy windows by their titles
-                    topScr = self.user32.FindWindowW(None, TOP_SCREEN_WINDOW_TITLE)
-                    bottomScr = self.user32.FindWindowW(None, BOTTOM_SCREEN_WINDOW_TITLE)
+                    top_title, bottom_title = self._window_titles
+                    topScr = self.user32.FindWindowW(None, top_title)
+                    bottomScr = self.user32.FindWindowW(None, bottom_title)
 
                     # Dock top screen if found and not already docked
                     if topScr and self.user32.GetParent(topScr) != self.hwnd_container:
@@ -498,9 +497,11 @@ class Launcher:
                 logger.info("Docking windows")
                 self.user32.ShowWindow(self.hwnd_container, SW_SHOW)
 
+                top_title, bottom_title = self._window_titles
+
                 # Re-find window handles in case they became invalid after undocking
-                topScr = self.user32.FindWindowW(None, TOP_SCREEN_WINDOW_TITLE)
-                bottomScr = self.user32.FindWindowW(None, BOTTOM_SCREEN_WINDOW_TITLE)
+                topScr = self.user32.FindWindowW(None, top_title)
+                bottomScr = self.user32.FindWindowW(None, bottom_title)
 
                 if not topScr or not bottomScr:
                     logger.error("Failed to find scrcpy windows for re-docking")
@@ -579,25 +580,24 @@ class Launcher:
                 logger.warning(f"Could not restore pygame window: {ShowPygameError}")
 
     def launch(self):
-        """
-        Main application entry point.
-        Starts all components in the following order:
-        1) Shows the loading screen
-        2) Detects the android device via ADB or shows wireless window
-        3) Start the scrcpy instances for both screens
-        4) Creates the container window
-        5) Starts the docking monitor
-        6) Initialises the Pygame UI
-        7) Enter the main event loop which handles:
-         - Pygame events
-         - Window position syncing
-         - UI rendering
-
-        It exits if no device is attached
-        """
         self.running = True
         self._wndproc = self._create_wnd_proc()
         show_loading_screen()
+
+        # Profile selection (no ScrcpyManager needed yet)
+        chosen_profile = show_device_selector(BUILTIN_PROFILES)
+        if chosen_profile is None:
+            logger.info("No profile selected, exiting")
+            self.stop()
+            return
+
+        # If layout has changed, then use new default scale
+        last_profile = self.config.get("last_profile")
+        if last_profile != chosen_profile.name:
+            self.launch_scale = chosen_profile.default_ui_scale
+
+        # Build ScrcpyManager with the chosen profile
+        self.scrcpy = ScrcpyManager(profile=chosen_profile, scale=self.launch_scale, max_fps=self.max_fps)
 
         # Detect device
         serial = self.scrcpy.detect_device()
@@ -629,10 +629,23 @@ class Launcher:
                 self.stop()
                 return
 
-        # Start scrcpy if no device is connected
+        # Compute layout now that profile dimensions are known
+        self.global_scale = self.scrcpy.scale
+        self.launch_scale = self.scrcpy.scale
+
+        w1, h1 = self.scrcpy.f_w1, self.scrcpy.f_h1
+        w2, _ = self.scrcpy.f_w2, self.scrcpy.f_h2
+        self.tx = TOP_SCREEN_DEFAULT_X
+        self.ty = TOP_SCREEN_DEFAULT_Y
+        self.by = int(h1)
+        self.bx = int(w1 * HALF - w2 * HALF)
+        logger.info(
+            f"Layout set: Top(0,0), Bottom({self.bx}, {self.by}) at scale {self.global_scale} for profile '{chosen_profile.name}'")
+
+        # Start scrcpy
         if serial:
             logger.info(f"Starting scrcpy with device: {serial} (mode: {self.scrcpy.connection_mode})")
-            self.scrcpy.start_scrcpy(serial)
+            self.scrcpy.start_scrcpy(serial=serial)
         else:
             logger.error("No device available to start scrcpy")
             self.stop()
@@ -643,7 +656,7 @@ class Launcher:
         threading.Thread(target=self._docking_monitor, daemon=True).start()
 
         # Init UI and event loop
-        from src.ui_pygame import PygameUI
+
 
         pygame.init()
         self.ui = PygameUI(self)
@@ -655,7 +668,6 @@ class Launcher:
                     self.stop()
                 self.ui.handle_event(event)
 
-            # Sync window positions if they exist
             if self.dock.hwnd_top or self.dock.hwnd_bottom:
                 self.dock.sync(
                     self.tx,

@@ -22,6 +22,7 @@ import subprocess
 import time
 import shutil
 import logging
+import ctypes
 import re
 
 # Setup logger for this module
@@ -33,19 +34,6 @@ CREATE_NO_WINDOW = 0x08000000
 # Important for sustained smoothness when the host CPU has other work.
 HIGH_PRIORITY_CLASS = 0x00000080
 SCRCPY_CREATION_FLAGS = CREATE_NO_WINDOW | HIGH_PRIORITY_CLASS
-
-# Default UI scaling
-DEFAULT_UI_SCALING = 0.6
-
-# Top screen base resolution
-TOP_SCREEN_BASE_WIDTH = 1920
-TOP_SCREEN_BASE_HEIGHT = 1080
-
-# Resolution calculation factors for the bottom screen
-# These are device-specific ratios for the AYN Thor
-TOP_BOTTOM_SCALE_FACTOR = 5.23
-BOTTOM_WIDTH_SCALE_FACTOR = 2.95
-BOTTOM_HEIGHT_SCALE_FACTOR = 2.57
 
 # Scrcpy startup retry config
 SCRCPY_RETRY_COUNT = 2
@@ -75,12 +63,6 @@ TOP_BITRATE_SCALE = 24
 BOTTOM_BITRATE_MINIMUM = 6
 BOTTOM_BITRATE_SCALE = 18
 
-# AYN Thor Screen Constants
-TOP_SCREEN_DISPLAY_ID = "0"
-TOP_SCREEN_WINDOW_TITLE = "ThorCPY Top Screen"
-BOTTOM_SCREEN_DISPLAY_ID = "4"
-BOTTOM_SCREEN_WINDOW_TITLE = "ThorCPY Bottom Screen"
-
 # Timing delays for process management
 DISPLAY_INIT_DELAY = 1.2  # Wait for first display to initialize
 SCRCPY_CREATION_DELAY = 0.3  # Check if process survives startup
@@ -93,7 +75,6 @@ SCRCPY_TERMINATE_TIMEOUT = 3
 # Wireless connection defaults
 DEFAULT_WIRELESS_PORT = 5555
 
-
 # Main ScrcpyManager class
 class ScrcpyManager:
     """
@@ -102,16 +83,13 @@ class ScrcpyManager:
     resolution and process management and shutdown
     """
 
-    def __init__(self, scale=DEFAULT_UI_SCALING, scrcpy_bin=None, adb_bin=None,
-                 enable_audio_top=True, max_fps=int(DEFAULT_MAX_FPS)):
+    def __init__(self, profile, scale=None, scrcpy_bin=None,
+                 adb_bin=None, enable_audio_top=True, max_fps=int(DEFAULT_MAX_FPS)):
         """
         Initialize the scrcpy manager.
         """
-        logger.info(
-            f"Initializing ScrcpyManager (scale={scale}, audio={enable_audio_top}, fps={max_fps})"
-        )
-
-        self.scale = scale
+        self.scale = scale if scale is not None else profile.default_ui_scale
+        self.profile = profile
         self.processes = []
         self.serial = None
         self.enable_audio_top = enable_audio_top
@@ -120,17 +98,18 @@ class ScrcpyManager:
         self.max_fps = int(max_fps) if max_fps else int(DEFAULT_MAX_FPS)
         self._scrcpy_log_handles = []
 
+        logger.info(
+            f"Initializing ScrcpyManager (scale={self.scale}, audio={enable_audio_top}, fps={max_fps})"
+        )
+
         # Calculate top screen resolution based on scale
-        base_w1 = TOP_SCREEN_BASE_WIDTH
-        base_h1 = TOP_SCREEN_BASE_HEIGHT
-        self.f_w1 = int(base_w1 * self.scale)
-        self.f_h1 = int(base_h1 * self.scale)
+        self.f_w1 = int(profile.top_screen_width * self.scale)
+        self.f_h1 = int(profile.top_screen_height * self.scale)
         logger.debug(f"Top window resolution: {self.f_w1}x{self.f_h1}")
 
         # Calculate bottom screen resolution based on scale
-        pxi = (base_w1 * self.scale) / TOP_BOTTOM_SCALE_FACTOR
-        self.f_w2 = int(BOTTOM_WIDTH_SCALE_FACTOR * pxi)
-        self.f_h2 = int(BOTTOM_HEIGHT_SCALE_FACTOR * pxi)
+        self.f_w2 = int(self.f_w1 * profile.get_screen_width_ratio())
+        self.f_h2 = int(self.f_w2 * profile.bottom_screen_height / profile.bottom_screen_width)
         logger.debug(f"Bottom window resolution: {self.f_w2}x{self.f_h2}")
 
         # Locate scrcpy and adb binaries
@@ -538,6 +517,10 @@ class ScrcpyManager:
             logger.error(f"Error getting device IP: {GetIPError}")
             return None
 
+    def _window_titles(self):
+        name = self.profile.name
+        return f"{name} - Top Screen - ThorCPY", f"{name} - Bottom Screen - ThorCPY"
+
     def start_scrcpy(self, serial=None):
         """
         Start both scrcpy windows (top and bottom screen)
@@ -546,6 +529,10 @@ class ScrcpyManager:
         use_serial = serial or self.serial
         if not use_serial:
             raise RuntimeError("No device serial available")
+
+        profile = self.profile
+
+        top_title, bottom_title = self._window_titles()
 
         logger.info("=" * LOG_MULT)
         logger.info(f"Starting scrcpy for device: {use_serial}")
@@ -561,8 +548,8 @@ class ScrcpyManager:
         logger.info("Starting top screen window")
         self._start_window(
             use_serial,
-            TOP_SCREEN_DISPLAY_ID,
-            TOP_SCREEN_WINDOW_TITLE,
+            profile.top_display_id,
+            top_title,
             self.f_w1,
             self.f_h1,
             enable_audio=self.enable_audio_top,
@@ -572,14 +559,27 @@ class ScrcpyManager:
         )
 
         # Wait for first display to stabilize
-        time.sleep(DISPLAY_INIT_DELAY)
+        logger.info("Waiting for top screen window to appear before starting bottom...")
+        deadline = time.time() + 15.0
+        while time.time() < deadline:
+            hwnd = ctypes.windll.user32.FindWindowW(None, top_title)
+            if hwnd:
+                logger.info(f"Top screen window confirmed (HWND: {hwnd}), starting bottom screen")
+                break
+            time.sleep(0.25)
+        else:
+            logger.warning("Top screen window not detected within 15s, starting bottom screen anyway")
+
+        logger.info(f"Waiting for server to stabilise...")
+        time.sleep(profile.screen_launch_delay)
+        logger.info("Server stabilisation delay finished.")
 
         # Launch bottom screen
         logger.info("Starting bottom screen window")
         self._start_window(
             use_serial,
-            BOTTOM_SCREEN_DISPLAY_ID,
-            BOTTOM_SCREEN_WINDOW_TITLE,
+            profile.bottom_display_id,
+            bottom_title,
             self.f_w2,
             self.f_h2,
             enable_audio=False,
@@ -636,8 +636,10 @@ class ScrcpyManager:
             "--max-fps", str(max_fps_override if max_fps_override is not None else self.max_fps),
             "--render-driver", DEFAULT_RENDER_DRIVER,
             "--video-codec", DEFAULT_VIDEO_CODEC,
-            "--video-encoder=c2.qti.avc.encoder",
             f"--video-codec-options={codec_options}",
+            "--no-mipmaps",
+            "--no-power-on",
+            "--no-cleanup",
             "--print-fps",
         ]
 

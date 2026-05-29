@@ -20,7 +20,7 @@
 __version__ = "0.4.0"
 __app_name__ = "ThorCPY"
 __author__ = "the_swest"
-__description__ = "AYN Thor screen mirroring and docking tool"
+__description__ = "Android Dual screen mirroring and docking tool"
 
 import ctypes
 import os
