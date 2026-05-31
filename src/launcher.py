@@ -17,25 +17,29 @@
 
 # src/launcher.py
 
-import threading
+import os
+import sys
 import time
 import ctypes
-import tkinter as tk
-from tkinter import messagebox
-import os
 import logging
+import threading
+import subprocess
+import customtkinter as _ctk
 from ctypes import wintypes
+from tkinter import messagebox
+from dataclasses import replace as dc_replace
 
-from src.scrcpy_manager import ScrcpyManager
-from src.win32_dock import Win32Dock, apply_docked_style, apply_undocked_style
 from src.presets import PresetStore
 from src.config import ConfigManager
-from src.ui_ctk import show_loading_screen, CTkUI
+from src.scrcpy_manager import ScrcpyManager
+from src.device_profile import BUILTIN_PROFILES
 from src.win32_darkmode import enable_dark_titlebar
 from src.wireless_dialog import show_wireless_dialog
-
 from src.device_selector import show_device_selector
-from src.device_profile import BUILTIN_PROFILES
+from src.custom_profile_store import CustomProfileStore
+from src.control_panel import show_loading_screen, CTkUI
+from src.win32_dock import Win32Dock, apply_docked_style, apply_undocked_style
+from src.device_detection import detect_device, resolve_adb, get_device_info, get_display_list
 
 logger = logging.getLogger(__name__)
 
@@ -63,14 +67,7 @@ BLACK_BRUSH = 4
 # Process creation flags
 CREATE_NO_WINDOW = 0x08000000
 
-# Default layout positioning
-TOP_SCREEN_DEFAULT_X = 0
-TOP_SCREEN_DEFAULT_Y = 0
-BOTTOM_SCREEN_DEFAULT_X = 0
-BOTTOM_SCREEN_DEFAULT_Y = 0
-DEFAULT_GLOBAL_SCALE = 0.6
-
-# Allowed scrcpy FPS values exposed in the control panel.
+# Allowed scrcpy FPS values exposed in the control panel
 ALLOWED_FPS_VALUES = (30, 60, 90, 120)
 DEFAULT_MAX_FPS = 60
 
@@ -81,15 +78,9 @@ DEFAULT_CONTAINER_Y = 100
 # Timing constants
 SCRCPY_POLL_INTERVAL = 0.1
 DOCKING_MONITOR_TIME_DELAY = 0.5
-UI_FPS = 60
 
 # Math constants
 HALF = 0.5
-
-# Default config
-DEFAULT_LAYOUT = {"tx": TOP_SCREEN_DEFAULT_X, "ty": TOP_SCREEN_DEFAULT_Y,
-                  "bx": BOTTOM_SCREEN_DEFAULT_X, "by": BOTTOM_SCREEN_DEFAULT_Y,
-                  "global_scale": DEFAULT_GLOBAL_SCALE}
 
 
 class Launcher:
@@ -116,6 +107,7 @@ class Launcher:
         # Load config managers
         self.store = PresetStore("config/layout.json")
         self.config = ConfigManager("config/config.json")
+        self.custom_profiles = CustomProfileStore("config/custom_profiles.json")
 
         # Load scale from config if saved, otherwise let ScrcpyManager fall back to profile
         saved_scale = self.config.get("global_scale", None)
@@ -128,8 +120,7 @@ class Launcher:
             cfg_fps = DEFAULT_MAX_FPS
         self.max_fps = cfg_fps if cfg_fps in ALLOWED_FPS_VALUES else DEFAULT_MAX_FPS
 
-        # Layout attributes — uninitialised until launch() selects a profile and
-        # ScrcpyManager computes the real dimensions.
+        # Layout attributes
         self.scrcpy = None
         self.tx = None
         self.ty = None
@@ -137,9 +128,9 @@ class Launcher:
         self.by = None
         self.global_scale = None
 
-        # _tk_root starts as None; it is set to self.ui.window once the CTK
-        # UI is created in launch(), giving dialogs a proper parent.
-        # Pre-launch dialogs (messagebox, wireless setup) work without a parent.
+        # ADB model name of the connected device
+        self.device_model = None
+
         self._tk_root = None
 
         # Initialise window management
@@ -163,20 +154,72 @@ class Launcher:
                 self.LPARAM,
             ]
             self.user32.DefWindowProcW.restype = self.LRESULT
-        except Exception as ArgtypeError:
-            logger.error(f"Error when defining window argtypes: {ArgtypeError}")
+        except Exception as e:
+            logger.error(f"Error when defining window argtypes: {e}")
             pass
 
-        # Make sure GDI signatures are wide enough for 64-bit handles.
+        # Make sure GDI signatures are wide enough for 64-bit handles
         try:
             self._setup_gdi_signatures()
-        except Exception as GdiArgtypeError:
-            logger.error(f"Error when defining GDI argtypes: {GdiArgtypeError}")
+        except Exception as e:
+            logger.error(f"Error when defining GDI argtypes: {e}")
+
+    def _save_device_profile(self, serial: str, profile_key: str, scale: float = None):
+        """
+        Persist a serial and storage_key (and optionally scale) mapping so that
+        the next boot for this device loads the exact profile and scale chosen
+        If scale is None the existing saved scale for this serial is left alone
+        """
+        try:
+            cfg = self.config.load()
+            device_profiles = cfg.get("device_profiles", {})
+            device_profiles[serial] = profile_key
+            cfg["device_profiles"] = device_profiles
+
+            if scale is not None:
+                device_scales = cfg.get("device_scales", {})
+                device_scales[serial] = scale
+                cfg["device_scales"] = device_scales
+
+            self.config.save(cfg)
+
+            logger.info(f"Saved device profile mapping: {serial} -> key '{profile_key}'" +
+                        (f", scale {scale}" if scale is not None else ""))
+
+        except Exception as e:
+            logger.error(f"Failed to save device profile mapping: {e}")
+
+    def _save_device_scale(self, serial: str, scale: float):
+        """Keep only the scale for a specific device serial"""
+        try:
+            cfg = self.config.load()
+            device_scales = cfg.get("device_scales", {})
+            device_scales[serial] = scale
+            cfg["device_scales"] = device_scales
+            self.config.save(cfg)
+        except Exception as e:
+            logger.error(f"Failed to save device scale: {e}")
+
+    def get_default_layout(self):
+        """
+        Return the centred default layout dictionary for the current profile/scale
+        """
+        w1, h1 = self.scrcpy.f_w1, self.scrcpy.f_h1
+        w2, h2 = self.scrcpy.f_w2, self.scrcpy.f_h2
+        ty = 0
+        by = int(h1)
+
+        if w1 >= w2:
+            tx = 0
+            bx = int((w1 - w2) * HALF)
+        else:
+            bx = 0
+            tx = int((w2 - w1) * HALF)
+        return {"tx": tx, "ty": ty, "bx": bx, "by": by}
 
     def save_layout(self):
         """
-        Saves current state and scale to config file in a single write
-        Called during shutdown to keep settings.
+        Saves current state and scale to config file
         """
         try:
             cfg = self.config.load()
@@ -185,23 +228,45 @@ class Launcher:
             cfg["bx"] = self.bx
             cfg["by"] = self.by
             cfg["global_scale"] = self.global_scale
-            cfg["last_profile"] = self.scrcpy.profile.name
+
+            if self.scrcpy and getattr(self.scrcpy, "profile", None):
+                cfg["last_profile"] = self.scrcpy.profile.name
+
+            # Persist scale per-device so each device remembers its own scale
+            if self.scrcpy and self.global_scale is not None:
+                serial = getattr(self.scrcpy, "serial", None)
+
+                if serial:
+                    device_scales = cfg.get("device_scales", {})
+                    device_scales[serial] = self.global_scale
+                    cfg["device_scales"] = device_scales
+
             self.config.save(cfg)
             logger.info(f"Saved configuration (Scale: {self.global_scale})")
-        except Exception as SaveConfigError:
-            logger.error(f"Failed to save configuration: {SaveConfigError}")
+
+        except Exception as e:
+            logger.error(f"Failed to save configuration: {e}")
 
     def save_scale(self):
         """Save only the global scale to config in a single write"""
         try:
             cfg = self.config.load()
             cfg["global_scale"] = self.global_scale
+
+            if self.scrcpy and self.global_scale is not None:
+                serial = getattr(self.scrcpy, "serial", None)
+
+                if serial:
+                    device_scales = cfg.get("device_scales", {})
+                    device_scales[serial] = self.global_scale
+                    cfg["device_scales"] = device_scales
+
             self.config.save(cfg)
-        except Exception as SaveScaleError:
-            logger.error(f"Failed to save scale: {SaveScaleError}")
+
+        except Exception as e:
+            logger.error(f"Failed to save scale: {e}")
 
     def _create_wnd_proc(self):
-        # We only need these two for the stable "double-click style" logic
         WM_LBUTTONDOWN = 0x0201
         WM_PARENTNOTIFY = 0x0210
 
@@ -214,7 +279,7 @@ class Launcher:
                 self.stop()
                 return 0
 
-            # New: Handle activation when the mouse enters/clicks the container
+            # Handle activation when the mouse enters/clicks the container
             if msg == WM_MOUSEACTIVATE:
                 # Get mouse position relative to container
                 pt = wintypes.POINT()
@@ -233,7 +298,6 @@ class Launcher:
             # This is the ONLY place focus should be handled
             if msg == WM_PARENTNOTIFY:
                 if (wp & 0xFFFF) == WM_LBUTTONDOWN:
-                    # lp contains coordinates relative to the ThorCPY container
                     mx = lp & 0xFFFF
                     my = (lp >> 16) & 0xFFFF
 
@@ -251,12 +315,7 @@ class Launcher:
 
     def _setup_gdi_signatures(self):
         """
-        Tell ctypes the proper signatures for the GDI functions we
-        invoke. Without this, ctypes defaults arguments to c_int and
-        returns int, which truncates 64-bit Windows HANDLE/HBITMAP/HDC
-        values once the OS hands us addresses above 2^31.
-
-        Safe to call multiple times - argtypes assignment is idempotent.
+        Tell ctypes the proper signatures for the GDI functions we invoke
         """
         gdi32 = ctypes.windll.gdi32
         gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
@@ -272,20 +331,20 @@ class Launcher:
             wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.DWORD,
         ]
         gdi32.BitBlt.restype = wintypes.BOOL
-        # Stock-object lookup + FillRect handles need 64-bit-safe
-        # signatures or the BUTTONS=OFF black-fill silently no-ops.
         gdi32.GetStockObject.argtypes = [ctypes.c_int]
         gdi32.GetStockObject.restype = wintypes.HGDIOBJ
+
         self.user32.FillRect.argtypes = [
             wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.HBRUSH,
         ]
+
         self.user32.FillRect.restype = ctypes.c_int
         self.user32.UpdateWindow.argtypes = [wintypes.HWND]
         self.user32.UpdateWindow.restype = wintypes.BOOL
 
     def cycle_max_fps(self):
         """
-        Cycle through the allowed FPS presets (30 -> 60 -> 120 -> 30).
+        Cycle through the allowed FPS presets (30 -> 60 -> 120 -> 30)
         Persists to config. Takes effect on the next scrcpy restart;
         the user is expected to click RESTART afterwards.
         """
@@ -298,7 +357,7 @@ class Launcher:
         return new_fps
 
     def set_max_fps(self, fps):
-        """Set the FPS cap and persist; restart required to take effect."""
+        """Set the FPS cap and persist; restart required to take effect"""
         if fps not in ALLOWED_FPS_VALUES:
             logger.warning(f"Ignoring out-of-range FPS request: {fps}")
             return
@@ -306,9 +365,9 @@ class Launcher:
         self.max_fps = fps
         try:
             self.config.set("max_fps", fps)
-        except Exception as FpsSaveError:
-            logger.warning(f"Failed to persist max_fps: {FpsSaveError}")
-        # Update the live ScrcpyManager so a restart picks it up.
+        except Exception as e:
+            logger.warning(f"Failed to persist max_fps: {e}")
+        # Update the live ScrcpyManager so a restart picks it up
         if hasattr(self, "scrcpy"):
             self.scrcpy.max_fps = fps
 
@@ -317,23 +376,15 @@ class Launcher:
         Restart the entire application. Spawns a fresh main.py (or
         the bundled exe under PyInstaller) and exits this process.
         Used by the control panel after global-scale or FPS changes.
-
-        IMPORTANT: in onefile PyInstaller mode, the parent process
-        sets `_MEIPASS2` in its environment so child invocations of
-        the same exe re-use the parent's already-extracted bundle
-        folder. That's the wrong behaviour here - the parent is
-        about to exit and tear down its `_MEI...` folder, which
-        would yank `adb.exe` and `scrcpy.exe` out from under the
-        child. We scrub PyInstaller's bootloader env vars from the
-        child's environment so it creates its own fresh extraction.
         """
-        import subprocess
-        import sys
         try:
             if getattr(sys, "frozen", False):
+                project_root = os.path.dirname(sys.executable)
                 cmd = [sys.executable]
             else:
-                cmd = [sys.executable, "main.py"]
+                project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                main_script = os.path.join(project_root, "main.py")
+                cmd = [sys.executable, main_script]
 
             child_env = os.environ.copy()
             for key in (
@@ -345,19 +396,19 @@ class Launcher:
                 child_env.pop(key, None)
 
             logger.info(f"Restarting application: {' '.join(cmd)}")
-            subprocess.Popen(cmd, cwd=os.getcwd(), env=child_env)
-        except Exception as RestartSpawnError:
-            logger.error(f"Failed to spawn restart process: {RestartSpawnError}",
-                         exc_info=True)
+            subprocess.Popen(cmd, cwd=project_root, env=child_env)
+
+        except Exception as e:
+            logger.error(f"Failed to spawn restart process: {e}", exc_info=True)
             return
-        # Now tear ourselves down (this calls os._exit(0) at the end).
+
         self.stop()
 
     def _create_container_window(self):
         """
         Creates the main container window in a background thread
         Handles both scrcpy windows as children
-        Waits for scrcpy dimensions to be available before creating window.
+        Waits for scrcpy dimensions to be available before creating window
         """
 
         def loop():
@@ -388,7 +439,7 @@ class Launcher:
             wc = WNDCLASSEX()
             wc.cbSize = ctypes.sizeof(WNDCLASSEX)
             wc.lpfnWndProc = ctypes.cast(self._wndproc, ctypes.c_void_p).value
-            wc.lpszClassName = "ThorFinalBridge"
+            wc.lpszClassName = "ThorCPYBridge"
             hinst = self.kernel32.GetModuleHandleW(None)
             wc.hInstance = hinst
             wc.hbrBackground = ctypes.windll.gdi32.GetStockObject(BLACK_BRUSH)
@@ -409,7 +460,7 @@ class Launcher:
             # Create the container window
             hwnd = self.user32.CreateWindowExW(
                 WS_EX_CONTROLPARENT,
-                "ThorFinalBridge",
+                "ThorCPYBridge",
                 "ThorCPY",
                 style,
                 DEFAULT_CONTAINER_X,
@@ -525,11 +576,8 @@ class Launcher:
         Shows the wireless connection dialog.
         Hides the scrcpy container window first so it doesn't conflict with
         the dialog grab, then restores it when the dialog closes.
-
-        The CTK control panel window is hidden/restored by the _on_wireless
-        callback in CTkUI before/after this method is called.
         """
-        logger.info("Opening wireless connection dialog — hiding scrcpy container")
+        logger.info("Opening wireless connection dialog - hiding scrcpy container")
 
         # Hide scrcpy container
         if self.hwnd_container:
@@ -540,24 +588,22 @@ class Launcher:
 
             if result == 'connected':
                 logger.info("Wireless connection established via dialog")
-                return True
+                return 'connected'
             elif result == 'disconnected':
                 logger.info("Device disconnected via dialog")
-                return False
+                return 'disconnected'
             else:
                 logger.info("Dialog closed without action")
                 return None
 
-        except Exception as DialogError:
-            logger.error(f"Error showing wireless dialog: {DialogError}")
+        except Exception as e:
+            logger.error(f"Error showing wireless dialog: {e}")
             messagebox.showerror(
-                "Dialog Error",
-                f"Failed to show wireless connection dialog:\n{DialogError}"
-            )
+                "Dialog Error", f"Failed to show wireless connection dialog")
             return None
 
         finally:
-            logger.info("Wireless dialog closed — restoring scrcpy container")
+            logger.info("Wireless dialog closed - restoring scrcpy container")
             if self.hwnd_container:
                 self.user32.ShowWindow(self.hwnd_container, SW_SHOW)
 
@@ -566,27 +612,12 @@ class Launcher:
         self._wndproc = self._create_wnd_proc()
         show_loading_screen()
 
-        # Profile selection (no ScrcpyManager needed yet)
-        chosen_profile = show_device_selector(BUILTIN_PROFILES)
-        if chosen_profile is None:
-            logger.info("No profile selected, exiting")
-            self.stop()
-            return
+        adb_bin = resolve_adb("adb")
+        serial = detect_device(adb_bin)
 
-        # If layout has changed, then use new default scale
-        last_profile = self.config.get("last_profile")
-        if last_profile != chosen_profile.name:
-            self.launch_scale = chosen_profile.default_ui_scale
-
-        # Build ScrcpyManager with the chosen profile
-        self.scrcpy = ScrcpyManager(profile=chosen_profile, scale=self.launch_scale, max_fps=self.max_fps)
-
-        # Detect device
-        serial = self.scrcpy.detect_device()
-
-        # If no device found, suggest wireless connection
+        # If no device is found on boot, use wireless
         if not serial:
-            logger.info("No USB device found, offering wireless connection")
+            logger.info("No USB device found on boot, offering wireless connection")
 
             response = messagebox.askyesno(
                 "No Device Found",
@@ -597,6 +628,11 @@ class Launcher:
             )
 
             if response:
+                # The dialog requires ScrcpyManager to function.
+                # We give it a temporary default profile just to work properly
+                default_boot_profile = BUILTIN_PROFILES.get("ayn_thor") or list(BUILTIN_PROFILES.values())[0]
+                self.scrcpy = ScrcpyManager(profile=default_boot_profile, scale=self.launch_scale, max_fps=self.max_fps)
+
                 result = show_wireless_dialog(self._tk_root, self.scrcpy, config=self.config)
 
                 if result == 'connected':
@@ -611,18 +647,143 @@ class Launcher:
                 self.stop()
                 return
 
+        if self._tk_root is None:
+            _hidden = _ctk.CTk()
+            _hidden.withdraw()
+            self._tk_root = _hidden
+            self._hidden_ctk_root = _hidden
+
+        # Resolve device model name
+        _dev_info = get_device_info(adb_bin, serial)
+        self.device_model = (_dev_info or {}).get("model", "Unknown Device")
+
+        # Check config for a previously saved profile for this serial
+        device_profiles_map = self.config.get("device_profiles", {})
+        remembered_key = device_profiles_map.get(serial)
+        chosen_profile = None
+
+        device_scales_map = self.config.get("device_scales", {})
+        remembered_scale = device_scales_map.get(serial)
+
+        if remembered_key:
+            logger.info(f"Remembered profile key for {serial}: '{remembered_key}'")
+            # Look up by storage key in custom store first
+            all_custom = self.custom_profiles.load_all()
+
+            if remembered_key in all_custom:
+                chosen_profile = all_custom[remembered_key]
+                logger.info(f"Resolved custom profile: '{chosen_profile.nickname or chosen_profile.name}'")
+            # Fall back to builtin key lookup
+            elif remembered_key in BUILTIN_PROFILES:
+                chosen_profile = BUILTIN_PROFILES[remembered_key]
+                logger.info(f"Resolved builtin profile: '{chosen_profile.name}'")
+            else:
+                logger.warning(
+                    f"Remembered key '{remembered_key}' no longer exists - "
+                    f"falling back to auto-detection"
+                )
+
+        if chosen_profile is not None:
+            # Apply live display specs (same logic as device_selector)
+            display_list = get_display_list(adb_bin, serial)
+
+            if display_list and len(display_list) >= 2:
+                flipped = chosen_profile.flipped_screens
+                top_display    = display_list[1] if flipped else display_list[0]
+                bottom_display = display_list[0] if flipped else display_list[1]
+
+                chosen_profile = dc_replace(
+                    chosen_profile,
+                    top_display_id=str(top_display["id"]),
+                    bottom_display_id=str(bottom_display["id"]),
+                    top_screen_width=int(top_display["width"]),
+                    top_screen_height=int(top_display["height"]),
+                    bottom_screen_width=int(bottom_display["width"]),
+                    bottom_screen_height=int(bottom_display["height"]),
+                )
+
+            logger.info(f"Using remembered profile: '{chosen_profile.name}'")
+        else:
+            chosen_profile = show_device_selector(
+                BUILTIN_PROFILES,
+                adb_bin,
+                serial,
+                custom_store=self.custom_profiles,
+                parent_window=self._tk_root,
+            )
+            # Clear any stale per-device scale
+            if chosen_profile is not None:
+                try:
+                    cfg = self.config.load()
+                    device_scales = cfg.get("device_scales", {})
+
+                    if serial in device_scales:
+                        device_scales.pop(serial)
+                        cfg["device_scales"] = device_scales
+                        self.config.save(cfg)
+                        logger.info(
+                            f"Cleared stale device scale for {serial} "
+                            f"so new profile default ({chosen_profile.default_ui_scale}) takes effect"
+                        )
+
+                except Exception as e:
+                    logger.warning(f"Could not clear stale device scale: {e}")
+
+                remembered_scale = None
+
+        if chosen_profile is None:
+            logger.info("No profile selected, exiting")
+            self.stop()
+            return
+
+        # Keep this serial
+        _custom_all = self.custom_profiles.load_all()
+        _profile_key = next(
+            (k for k, v in _custom_all.items() if v.name == chosen_profile.name
+             and v.nickname == chosen_profile.nickname),
+            next(
+                (k for k, v in BUILTIN_PROFILES.items() if v.name == chosen_profile.name),
+                chosen_profile.name,
+            ),
+        )
+
+        if remembered_scale is not None:
+            self.launch_scale = remembered_scale
+            logger.info(f"Using remembered scale for {serial}: {remembered_scale}")
+        else:
+            self.launch_scale = chosen_profile.default_ui_scale
+            logger.info(f"Using profile default scale: {chosen_profile.default_ui_scale}")
+
+        self._save_device_profile(serial, _profile_key)
+
+        # Re-instantiate ScrcpyManager with the actual proper profile
+        self.scrcpy = ScrcpyManager(profile=chosen_profile, scale=self.launch_scale, max_fps=self.max_fps)
+        self.scrcpy.serial = serial
+
         # Compute layout now that profile dimensions are known
         self.global_scale = self.scrcpy.scale
         self.launch_scale = self.scrcpy.scale
 
         w1, h1 = self.scrcpy.f_w1, self.scrcpy.f_h1
-        w2, _ = self.scrcpy.f_w2, self.scrcpy.f_h2
-        self.tx = TOP_SCREEN_DEFAULT_X
-        self.ty = TOP_SCREEN_DEFAULT_Y
+        w2, h2 = self.scrcpy.f_w2, self.scrcpy.f_h2
+
+        self.ty = 0
         self.by = int(h1)
-        self.bx = int(w1 * HALF - w2 * HALF)
+
+        # Screen alignment centering logic
+        if w1 >= w2:
+            # Top screen is wider (or equal): Top pins to 0, Bottom centers
+            self.tx = 0
+            self.bx = int((w1 - w2) * HALF)
+        else:
+            # Bottom screen is wider: Bottom pins to 0, Top centers over it
+            self.bx = 0
+            self.tx = int((w2 - w1) * HALF)
+
         logger.info(
-            f"Layout set: Top(0,0), Bottom({self.bx}, {self.by}) at scale {self.global_scale} for profile '{chosen_profile.name}'")
+            f"Layout set: Top({self.tx}, {self.ty}), Bottom({self.bx}, {self.by}) "
+            f"at scale {self.global_scale} for profile '{chosen_profile.name}'"
+        )
 
         # Start scrcpy
         if serial:
@@ -637,20 +798,130 @@ class Launcher:
         self._create_container_window()
         threading.Thread(target=self._docking_monitor, daemon=True).start()
 
-        # Create CTK control panel.  The window starts hidden; deiconify()
-        # is called inside CTkUI.__init__ after all widgets are built.
-        # We also stash the CTK window as _tk_root so post-launch dialogs
-        # (e.g. the wireless dialog) have a proper parent window.
+        # If we created a hidden bootstrap root for the profile dialog, destroy it
+        if hasattr(self, "_hidden_ctk_root") and self._hidden_ctk_root:
+            try:
+                self._hidden_ctk_root.destroy()
+            except Exception:
+                pass
+            self._hidden_ctk_root = None
+            self._tk_root = None
+
+        # Create control panel
         self.ui = CTkUI(self)
         self._tk_root = self.ui.window
 
-        # Block here until the window is closed (replaces the old pygame loop).
-        # dock.sync() is driven by CTkUI._update_loop() via window.after().
         self.ui.run()
+
+    def _resize_container_window(self):
+        """
+        Resize the existing container window to fit the current scrcpy dimensions.
+        """
+        if not self.hwnd_container:
+            logger.warning("_resize_container_window: no container hwnd yet")
+            return
+
+        client_w = max(self.scrcpy.f_w1, self.scrcpy.f_w2 + abs(self.bx))
+        client_h = self.scrcpy.f_h1 + self.scrcpy.f_h2
+
+        style = WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
+        rect  = wintypes.RECT(0, 0, int(client_w), int(client_h))
+        self.user32.AdjustWindowRectEx(
+            ctypes.byref(rect), style, False, WS_EX_CONTROLPARENT
+        )
+
+        new_w = rect.right - rect.left
+        new_h = rect.bottom - rect.top
+
+        SWP_NOMOVE = 0x0002
+        SWP_NOZORDER = 0x0004
+        SWP_NOACTIVATE = 0x0010
+        SWP_FRAMECHANGED = 0x0020
+
+        self.user32.SetWindowPos(
+            self.hwnd_container, 0,
+            0, 0, new_w, new_h,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        )
+
+        logger.info(f"Container resized to {new_w}x{new_h} (client {int(client_w)}x{int(client_h)})")
+
+    def switch_profile(self, profile):
+        """
+        Switch the active device profile
+        """
+        logger.info(f"Switching profile to '{profile.name}'")
+
+        serial = self.scrcpy.serial if self.scrcpy else None
+        if not serial:
+            logger.error("switch_profile: no active serial - cannot restart scrcpy")
+            return
+
+        # Stop current scrcpy
+        try:
+            self.scrcpy.stop()
+        except Exception as e:
+            logger.warning(f"Error stopping scrcpy during profile switch: {e}")
+
+        # Clear stale dock handles - docking monitor will re-discover them
+        with self.dock_lock:
+            self.dock.hwnd_top = None
+            self.dock.hwnd_bottom = None
+            self.dock.invalidate_geom_cache()
+
+        # make a new ScrcpyManager with the new profile's default scale
+        self.launch_scale = profile.default_ui_scale
+        self.global_scale = profile.default_ui_scale
+        self.scrcpy = ScrcpyManager(
+            profile=profile,
+            scale=self.launch_scale,
+            max_fps=self.max_fps,
+        )
+        self.scrcpy.serial = serial
+
+        # setup default centred layout
+        w1, h1 = self.scrcpy.f_w1, self.scrcpy.f_h1
+        w2, h2 = self.scrcpy.f_w2, self.scrcpy.f_h2
+
+        self.ty = 0
+        self.by = int(h1)
+
+        if w1 >= w2:
+            self.tx = 0
+            self.bx = int((w1 - w2) * HALF)
+        else:
+            self.bx = 0
+            self.tx = int((w2 - w1) * HALF)
+
+        logger.info(
+            f"Profile switch layout: Top({self.tx},{self.ty}) "
+            f"Bottom({self.bx},{self.by}) scale={self.global_scale}"
+        )
+
+        # Start scrcpy
+        try:
+            self.scrcpy.start_scrcpy(serial=serial)
+        except Exception as e:
+            logger.error(f"Failed to restart scrcpy after profile switch: {e}")
+            return
+
+        self.save_layout()
+        self._resize_container_window()
+
+        # Sync UI
+        if hasattr(self, "ui") and self.ui:
+            def _sync():
+                try:
+                    self.ui._sync_sliders_from_launcher()
+                    self.ui.show_status(f"Profile loaded: {profile.name}", "success")
+                except Exception as e:
+                    logger.warning(f"UI sync after profile switch failed: {e}")
+
+            self.ui.window.after(0, _sync)
 
     def stop(self):
         """
-        Cleanly shuts down the application.
+        Shuts down the application
         1) Saves current layout config
         2) Stops all scrcpy processes
         3) Closes the CTK control panel (stops mainloop)
@@ -663,14 +934,13 @@ class Launcher:
         self.save_layout()
 
         # Taskkill the scrcpy processes
-        import subprocess
         subprocess.run(
             ["taskkill", "/F", "/IM", "scrcpy.exe", "/T"],
             capture_output=True,
             creationflags=CREATE_NO_WINDOW,
         )
 
-        # Stop the CTK main loop (no-ops if UI was never created)
+        # Stop the CTK main loop
         try:
             if hasattr(self, "ui") and self.ui and self.ui.window:
                 self.ui.window.quit()

@@ -1,4 +1,4 @@
-# ThorCPY – Dual-screen scrcpy docking and control UI for Windows
+# ThorCPY - Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #
@@ -15,36 +15,32 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# src/ui_ctk.py
+# src/control_panel.py
 
-import customtkinter as ctk
-import tkinter as tk
 import os
 import sys
 import time
-import logging
+import dxcam
 import ctypes
+import logging
+import win32clipboard
+import tkinter as tk
+import customtkinter as ctk
+from PIL import Image
+from io import BytesIO
 from ctypes import windll, wintypes
 
-import dxcam
-from PIL import Image, ImageDraw, ImageFont
-
 from src.win32_darkmode import enable_dark_titlebar
+from src.ui_constants import (
+    BG_COLOUR, PANEL_COLOUR, BORDER_COLOUR, TEXT_COLOUR,
+    ACCENT_COLOUR, ACCENT2_COLOUR, TOP_COLOUR, BOTTOM_COLOUR,
+    SUCCESS_COLOUR, DANGER_COLOUR, WARNING_COLOUR,
+    CALSANS_FAMILY, ICON_PATH, FONT_PATH,
+    resource_path, load_calsans, make_font, apply_window_icon,
+)
+from src.device_profile_editor import DeviceProfileEditorDialog
 
 logger = logging.getLogger(__name__)
-
-# Colours
-BG_COLOUR = "#121418"
-PANEL_COLOUR = "#1e2128"
-BORDER_COLOUR = "#2d3139"
-TEXT_COLOUR = "#c8cdd8"
-ACCENT_COLOUR = "#4000D4"
-ACCENT2_COLOUR = "#6A4BF4"
-TOP_COLOUR = "#A241ED"
-BOTTOM_COLOUR = "#936aad"
-SUCCESS_COLOUR = "#2ecc71"
-DANGER_COLOUR = "#e74c3c"
-WARNING_COLOUR = "#f39c12"
 
 # Slider range constraints
 SCREEN_MIN_POS = -500
@@ -75,64 +71,6 @@ SW_SHOW = 5
 CF_BITMAP = 2
 SRCCOPY = 0x00CC0020
 
-CALSANS_FAMILY = "Cal Sans"
-
-
-def resource_path(rel):
-    """Resolve a resource path for both dev and PyInstaller contexts."""
-    try:
-        if hasattr(sys, "_MEIPASS"):
-            path = os.path.join(sys._MEIPASS, rel)
-            logger.debug(f"Resource path (PyInstaller): {path}")
-            return path
-        path = os.path.join(os.path.abspath("."), rel)
-        logger.debug(f"Resource path (dev): {path}")
-        return path
-    except Exception as e:
-        logger.error(f"Failed to resolve resource path for '{rel}': {e}")
-        return rel
-
-
-ICON_PATH = resource_path("assets/icon.png")
-FONT_PATH = resource_path("assets/fonts/CalSans-Regular.ttf")
-
-# Tracks whether CalSans was successfully registered
-_calsans_loaded = False
-
-
-def load_calsans():
-    """
-    Register CalSans-Regular with Win32 (FR_PRIVATE) so CTK can use it by its by family name
-    Safe to call multiple times - skips if already loaded
-    Returns True if the font is available after the call
-    """
-    global _calsans_loaded
-    if _calsans_loaded:
-        return True
-    try:
-        FR_PRIVATE = 0x10
-        result = windll.gdi32.AddFontResourceExW(FONT_PATH, FR_PRIVATE, 0)
-        if result > 0:
-            _calsans_loaded = True
-            logger.info(f"CalSans loaded from {FONT_PATH}")
-        else:
-            logger.warning(
-                f"AddFontResourceExW returned 0 for {FONT_PATH} - "
-                "font may not render; falling back to CTK default"
-            )
-    except Exception as e:
-        logger.warning(f"CalSans load failed: {e}: falling back to CTK default")
-    return _calsans_loaded
-
-
-def make_font(size, weight = "normal"):
-    """
-    Return a CTkFont using CalSans if it loaded successfully, otherwise fall back to the CTK default font
-    """
-    if _calsans_loaded:
-        return ctk.CTkFont(family=CALSANS_FAMILY, size=size, weight=weight)
-    return ctk.CTkFont(size=size, weight=weight)
-
 # Loading screen
 def show_loading_screen():
     """
@@ -158,11 +96,7 @@ def show_loading_screen():
     splash.resizable(False, False)
     splash.configure(fg_color=BG_COLOUR)
 
-    try:
-        img = tk.PhotoImage(file=ICON_PATH)
-        splash.iconphoto(True, img)
-    except Exception:
-        pass
+    apply_window_icon(splash)
 
     title_frame = ctk.CTkFrame(splash, fg_color="transparent")
     title_frame.pack(pady=(32, 4))
@@ -276,11 +210,7 @@ class CTkUI:
             logger.warning(f"Failed auto control UI placement, using fallback: {e}")
             self.window.geometry("460x920")
 
-        try:
-            img = tk.PhotoImage(file=ICON_PATH)
-            self.window.iconphoto(True, img)
-        except Exception:
-            pass
+        apply_window_icon(self.window)
 
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -369,6 +299,19 @@ class CTkUI:
                                color=color, is_float=False,
                                on_change=self._on_layout_change)
 
+        # Default layout button
+        ctk.CTkButton(
+            self._scroll,
+            text="Reset to Default Position",
+            command=self._on_default_layout,
+            fg_color=PANEL_COLOUR,
+            hover_color=BORDER_COLOUR,
+            border_color=BORDER_COLOUR,
+            border_width=1,
+            text_color=TEXT_COLOUR,
+            font=make_font(13),
+        ).pack(fill="x", padx=16, pady=(4, 0))
+
         self._separator()
 
         self._section("Window Config")
@@ -440,10 +383,15 @@ class CTkUI:
             font=make_font(13),
         ).grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=4)
 
-        # Wireless Connection Button
+        # Wireless + Edit Device Profiles row
+        bottom_btn_row = ctk.CTkFrame(self._scroll, fg_color="transparent")
+        bottom_btn_row.pack(fill="x", padx=16, pady=(0, 4))
+        bottom_btn_row.columnconfigure(0, weight=1)
+        bottom_btn_row.columnconfigure(1, weight=1)
+
         ctk.CTkButton(
-            self._scroll,
-            text="Wireless Connection Settings",
+            bottom_btn_row,
+            text="Wireless",
             command=self._on_wireless,
             fg_color=PANEL_COLOUR,
             hover_color=BORDER_COLOUR,
@@ -451,7 +399,32 @@ class CTkUI:
             border_width=1,
             text_color=TEXT_COLOUR,
             font=make_font(13),
-        ).pack(fill="x", padx=16, pady=(0, 4))
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+
+        ctk.CTkButton(
+            bottom_btn_row,
+            text="Edit Device Profiles",
+            command=self._on_edit_profiles,
+            fg_color=PANEL_COLOUR,
+            hover_color=BORDER_COLOUR,
+            border_color=BORDER_COLOUR,
+            border_width=1,
+            text_color=TEXT_COLOUR,
+            font=make_font(13),
+        ).grid(row=0, column=1, sticky="ew", padx=(4, 0))
+
+        # Determine the display name of the initial loaded profile
+        current_prof = self.l.scrcpy.profile
+        display_name = current_prof.nickname.strip() if getattr(current_prof, "nickname", "") else current_prof.name
+
+        # Create and pack the indicator label
+        self._current_profile_label = ctk.CTkLabel(
+            self.window,
+            text=f"Active Profile: {display_name}",
+            font=make_font(14, "bold"),
+            text_color="#1a6b3a"
+        )
+        self._current_profile_label.pack(pady=(10, 5))
 
         # FPS restart warning / status label
         self._status_label = ctk.CTkLabel(
@@ -653,6 +626,16 @@ class CTkUI:
         else:
             self._scale_notice.configure(text="")
 
+    def _on_default_layout(self):
+        """Reset tx/ty/bx/by to the profile's centred default and sync everything"""
+        defaults = self.l.get_default_layout()
+        for attr, val in defaults.items():
+            self.l.__dict__[attr] = val
+        self.l.save_layout()
+        self._sync_sliders_from_launcher()
+        self.force_window_sync()
+        self.show_status("Position reset to default", "success")
+
     def _on_layout_change(self):
         for attr in ("tx", "ty", "bx", "by"):
             ref = self._slider_refs.get(attr)
@@ -692,6 +675,21 @@ class CTkUI:
                 self.show_status("Wireless connected", "success")
             elif result == "disconnected":
                 self.show_status("Device disconnected", "info")
+        finally:
+            self.window.deiconify()
+            self.window.lift()
+
+    def _on_edit_profiles(self):
+        """Open the custom device profile editor dialog"""
+        self.window.withdraw()
+
+        try:
+            DeviceProfileEditorDialog(
+                parent=self.window,
+                custom_store=self.l.custom_profiles,
+                launcher=self.l,
+            ).run()
+
         finally:
             self.window.deiconify()
             self.window.lift()
@@ -839,7 +837,7 @@ class CTkUI:
             except Exception:
                 pass
 
-        # CHANGED: Cleanly hide the frame layout footprint once the timer duration expires
+        # Hide the status label once the timer expires
         def _clear_status():
             self._status_label.configure(text="")
             self._status_label.pack_forget()
@@ -851,8 +849,7 @@ class CTkUI:
 
     def force_window_sync(self):
         """
-        Force an immediate dock sync, bypassing the throttle inside Win32Dock.
-        Mirrors the logic from PygameUI.force_window_sync() exactly.
+        Force an immediate dock sync, bypassing the throttle inside Win32Dock
         """
         try:
             if not self.l.docked:
@@ -887,11 +884,6 @@ class CTkUI:
 
     def take_screenshot(self):
         try:
-            import dxcam
-            import win32clipboard
-            from PIL import Image
-            from io import BytesIO
-
             user32 = ctypes.windll.user32
             client_rect = wintypes.RECT()
 
@@ -961,9 +953,14 @@ class CTkUI:
     # Internal helpers
     def _sync_sliders_from_launcher(self):
         """
-        Push current launcher state back into all slider widgets.
-        Called after a preset is loaded so the UI reflects the new values.
+        Push current launcher state back into all slider widgets
         """
+        # Keep the active-profile label in sync after a hot-swap
+        if hasattr(self, "_current_profile_label") and self.l.scrcpy:
+            prof = self.l.scrcpy.profile
+            display_name = prof.nickname.strip() if getattr(prof, "nickname", "") else prof.name
+            self._current_profile_label.configure(text=f"Active Profile: {display_name}")
+
         updates = {
             "global_scale": self.l.global_scale,
             "tx": self.l.tx,
@@ -990,7 +987,7 @@ class CTkUI:
         scale = self.l.global_scale or 0.6
         changed = abs(scale - self._original_scale) > SCALE_CHANGE_THRESHOLD
         self._scale_notice.configure(
-            text="⚠  Restart required to apply scale change" if changed else ""
+            text="Restart required to apply scale change" if changed else ""
         )
 
     def _update_loop(self):

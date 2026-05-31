@@ -17,10 +17,10 @@
 
 # src/win32_darkmode.py
 
-import ctypes
-from ctypes import wintypes
 import sys
+import ctypes
 import logging
+from ctypes import wintypes
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)

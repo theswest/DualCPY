@@ -22,11 +22,14 @@ __app_name__ = "ThorCPY"
 __author__ = "the_swest"
 __description__ = "Android Dual screen mirroring and docking tool"
 
-import ctypes
 import os
 import sys
-import logging
 import time
+import ctypes
+import logging
+import tkinter as tk
+from ctypes import wintypes
+from tkinter import messagebox
 from src.launcher import Launcher
 
 REQUIRED_FOLDERS = ["bin", "config", "logs"] # List of required folders that must exist in order to function
@@ -70,9 +73,6 @@ def check_windows_version():
             logger.warning(f"Windows 10 detected (Build {build}) - showing warning message")
             # Show warning
             try:
-                import tkinter as tk
-                from tkinter import messagebox
-
                 root = tk.Tk()
                 root.withdraw()
                 messagebox.showwarning(
@@ -215,7 +215,6 @@ def main():
     # share CPU with our message pump and chassis renderer. That
     # sharing is the source of the residual sub-frame audio hiccups.
     try:
-        from ctypes import wintypes
         ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000
         kernel32 = ctypes.windll.kernel32
         # 64-bit pseudo-handle from GetCurrentProcess() must NOT be

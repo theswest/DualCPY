@@ -1,4 +1,4 @@
-# ThorCPY – Dual-screen scrcpy docking and control UI for Windows
+# ThorCPY - Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #
@@ -18,12 +18,12 @@
 # src/scrcpy_manager.py
 
 import os
-import subprocess
-import time
-import shutil
-import logging
-import ctypes
 import re
+import time
+import ctypes
+import logging
+import subprocess
+from src.device_detection import resolve_adb
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)
@@ -113,8 +113,8 @@ class ScrcpyManager:
         logger.debug(f"Bottom window resolution: {self.f_w2}x{self.f_h2}")
 
         # Locate scrcpy and adb binaries
-        self.scrcpy_bin = scrcpy_bin or self._resolve_bin("scrcpy")
-        self.adb_bin = adb_bin or self._resolve_bin("adb")
+        self.scrcpy_bin = scrcpy_bin or resolve_adb("scrcpy")
+        self.adb_bin = adb_bin or resolve_adb("adb")
 
         if self.scrcpy_bin:
             logger.info(f"scrcpy binary found: {self.scrcpy_bin}")
@@ -131,158 +131,12 @@ class ScrcpyManager:
         self.scrcpy_start_delay = SCRCPY_START_DELAY
         logger.debug(f"Retry count: {self.scrcpy_retry_count}, Start delay: {self.scrcpy_start_delay}s")
 
-    def _resolve_bin(self, name):
-        """
-        Locate a bundled binary (scrcpy / adb).
-
-        Search order:
-          1. PyInstaller bundle (sys._MEIPASS/bin/) when running as a
-             frozen exe - this is what makes the standalone .exe work
-             without the user copying bin/ next to it.
-          2. ./bin next to the running script or exe.
-          3. The current working directory's bin/.
-          4. System PATH.
-        """
-        import sys
-        logger.debug(f"Resolving binary: {name}")
-
-        candidates = []
-
-        # 1) PyInstaller _MEIPASS unpacked bundle
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            candidates.append(os.path.join(meipass, "bin", f"{name}.exe"))
-
-        # 2) ./bin next to the script/exe
-        if getattr(sys, "frozen", False):
-            exe_dir = os.path.dirname(sys.executable)
-        else:
-            exe_dir = os.path.dirname(os.path.abspath(__file__))
-            # src/ -> project root
-            exe_dir = os.path.dirname(exe_dir)
-        candidates.append(os.path.join(exe_dir, "bin", f"{name}.exe"))
-
-        # 3) cwd
-        candidates.append(os.path.join(os.getcwd(), "bin", f"{name}.exe"))
-
-        for path in candidates:
-            if os.path.exists(path):
-                logger.info(f"Found {name} at: {path}")
-                return path
-
-        # 4) system PATH
-        found = shutil.which(name)
-        if found:
-            logger.info(f"Found {name} in system PATH: {found}")
-            return found
-
-        logger.warning(f"Binary '{name}' not found (checked: {candidates})")
-        return None
-
     def _is_wireless_serial(self, serial):
         """
         Check if a serial number is a wireless connection (IP:PORT)
         """
         # Wireless connections are in format IP:PORT (e.g., 192.168.1.100:5555)
         return ':' in serial and re.match(r'\d+\.\d+\.\d+\.\d+:\d+', serial)
-
-    def detect_device(self):
-        """
-        Detect and return serial of first connected Android ADB device.
-
-        Starts ADB server if needed, then queries for authorized devices.
-        Ignores unauthorized devices to prevent connection issues.
-        Supports both USB and wireless connections.
-        """
-        logger.info("Starting ADB device detection")
-
-        if self.serial:
-            logger.info(f"Device already detected: {self.serial}")
-            return self.serial
-
-        if not self.adb_bin:
-            logger.error("Cannot detect device: ADB binary not found")
-            return None
-
-        # Start ADB server (with one retry - the first launch on a
-        # freshly-downloaded build can be delayed by Defender's
-        # Mark-of-the-Web scan; the second attempt is virtually
-        # instant once the binary is scan-cached).
-        started = False
-        last_error = None
-        for attempt in range(1, ADB_SERVER_START_RETRIES + 1):
-            try:
-                logger.debug(f"Starting ADB server (attempt {attempt}/{ADB_SERVER_START_RETRIES})")
-                result = subprocess.run(
-                    [self.adb_bin, "start-server"],
-                    capture_output=ADB_CAPTURE_OUTPUT,
-                    text=True,
-                    timeout=ADB_SERVER_TIMEOUT,
-                )
-                if result.returncode != 0:
-                    logger.warning(f"ADB start-server returned code {result.returncode}")
-                started = True
-                break
-            except subprocess.TimeoutExpired as TimeoutErr:
-                last_error = TimeoutErr
-                logger.warning(
-                    f"ADB server start timed out (attempt {attempt}/{ADB_SERVER_START_RETRIES}); "
-                    f"likely Defender scanning a freshly-downloaded binary - retrying"
-                )
-            except Exception as AdbServerStartError:
-                last_error = AdbServerStartError
-                logger.error(f"Failed to start ADB server (attempt {attempt}): {AdbServerStartError}")
-        if not started:
-            logger.error(f"ADB server failed to start after {ADB_SERVER_START_RETRIES} attempts: {last_error}")
-            return None
-        logger.debug("ADB server started successfully")
-
-        # Get list of devices
-        try:
-            logger.debug("Running 'adb devices'")
-            result = subprocess.run(
-                [self.adb_bin, "devices"],
-                capture_output=ADB_CAPTURE_OUTPUT,
-                text=True,
-                timeout=ADB_SERVER_TIMEOUT,
-            )
-
-            if result.returncode != 0:
-                logger.error(f"'adb devices' failed with code {result.returncode}")
-                return None
-
-            # Parse output for authorized devices
-            lines = result.stdout.strip().split("\n")
-            logger.debug(f"ADB devices output: {lines}")
-
-            for line in lines[1:]:
-                parts = line.strip().split()
-                if len(parts) >= 2:
-                    serial, status = parts[0], parts[1]
-                    if status == "device":
-                        self.serial = serial
-                        # Determine connection mode
-                        if self._is_wireless_serial(serial):
-                            self.connection_mode = 'wireless'
-                            logger.info(f"Wireless device detected: {serial}")
-                        else:
-                            self.connection_mode = 'usb'
-                            logger.info(f"USB device detected: {serial}")
-                        return serial
-                    elif status == "unauthorized":
-                        logger.warning(f"Unauthorized device found: {serial} (please authorize on device)")
-                    else:
-                        logger.debug(f"Device with non-'device' status: {serial} ({status})")
-
-            logger.warning("No authorized devices found")
-            return None
-
-        except subprocess.TimeoutExpired:
-            logger.error("'adb devices' command timeout")
-            return None
-        except Exception as AdbDevicesError:
-            logger.error(f"Error during device detection: {AdbDevicesError}")
-            return None
 
     def connect_wireless(self, ip_address, port=DEFAULT_WIRELESS_PORT):
         """

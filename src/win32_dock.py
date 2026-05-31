@@ -17,8 +17,9 @@
 
 # src/win32_dock.py
 
-import ctypes
+import sys
 import time
+import ctypes
 import logging
 from ctypes import wintypes
 
@@ -392,8 +393,7 @@ def set_foreground_with_attach(hwnd):
         except Exception as e:
             logger.debug(f"SetForegroundWindow without attachment failed: {e}")
 
-        # WINDOWS 10 CHECK - Be extra cautious
-        import sys
+        # Windows 10 Check
         is_win10 = sys.getwindowsversion().build < 22000
 
         if is_win10:

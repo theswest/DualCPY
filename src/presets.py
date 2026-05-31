@@ -1,4 +1,4 @@
-# ThorCPY – Dual-screen scrcpy docking and control UI for Windows
+# ThorCPY - Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #
@@ -17,9 +17,9 @@
 
 # src/presets.py
 
-import json
 import os
 import re
+import json
 import logging
 
 # Validation Constants
@@ -36,17 +36,11 @@ logger = logging.getLogger(__name__)
 class PresetStore:
     """
     Manages persistence for layouts.
-
-    Validates saving, loading and deletion of the user-defined window layouts
-    Name validation and handles corrupted files.
     """
 
     def __init__(self, path):
         """
         Initialize storing the preset
-
-        Args:
-            path: Path to the JSON file for storing presets
         """
         logger.info(f"Initializing PresetStore with path: {path}")
         self.path = path
@@ -57,8 +51,8 @@ class PresetStore:
             if dir_path:
                 os.makedirs(dir_path, exist_ok=True)
                 logger.debug(f"Ensured directory exists: {dir_path}")
-        except Exception as DirectoryError:
-            logger.error(f"Failed to create preset directory: {DirectoryError}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Failed to create preset directory: {e}", exc_info=True)
             raise
 
         # Log if file exists
@@ -72,15 +66,7 @@ class PresetStore:
     @staticmethod
     def validate_preset_name(name):
         """
-        Validate preset name.
-
-        Checks for: Empty or whitespace names, length exceeding max length, windows-forbidden characters
-
-        Args:
-            name: The preset name to validate
-
-        Returns:
-            tuple: (is_valid: bool, error_message: str)
+        Validate preset name
         """
         logger.debug(f"Validating preset name: '{name}'")
 
@@ -114,15 +100,6 @@ class PresetStore:
     def save_preset(self, name, data):
         """
         Save a preset with validation.
-
-        Args:
-            name: Name of the preset
-            data: Dictionary containing preset data (tx, ty, bx, by)
-
-        Raises:
-            ValueError: If preset name is invalid
-            PermissionError: If file cannot be written to due to permissions
-            IOError: If file I/O fails
         """
         logger.info(f"Attempting to save preset: '{name}'")
 
@@ -152,29 +129,19 @@ class PresetStore:
 
             logger.info(f"Successfully saved preset '{name}' with data: {data}")
 
-        except PermissionError as PresetLoadingError:
-            logger.error(f"Permission denied writing to {self.path}: {PresetLoadingError}")
+        except PermissionError as e:
+            logger.error(f"Permission denied writing to {self.path}: {e}")
             raise
-        except IOError as FileIOError:
-            logger.error(f"IO error saving preset '{name}': {FileIOError}", exc_info=True)
+        except IOError as e:
+            logger.error(f"IO error saving preset '{name}': {e}", exc_info=True)
             raise
-        except Exception as PresetSaveError:
-            logger.error(f"Unexpected error saving preset '{name}': {PresetSaveError}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Unexpected error saving preset '{name}': {e}", exc_info=True)
             raise
 
     def delete_preset(self, name):
         """
-        Delete a preset by name.
-
-        Args:
-            name: Name of the preset to delete
-
-        Returns:
-            bool: True if preset was deleted, False if it didn't exist
-
-        Raises:
-            PermissionError: If file cannot be written
-            IOError: If file I/O fail
+        Delete a preset by name
         """
         logger.info(f"Attempting to delete preset: '{name}'")
 
@@ -195,24 +162,19 @@ class PresetStore:
                 logger.warning(f"Cannot delete preset '{name}': does not exist")
                 return False
 
-        except PermissionError as PresetDeleteError:
-            logger.error(f"Permission denied writing to {self.path}: {PresetDeleteError}")
+        except PermissionError as e:
+            logger.error(f"Permission denied writing to {self.path}: {e}")
             raise
-        except IOError as FileIOError:
-            logger.error(f"IO error deleting preset '{name}': {FileIOError}", exc_info=True)
+        except IOError as e:
+            logger.error(f"IO error deleting preset '{name}': {e}", exc_info=True)
             raise
-        except Exception as PresetDeleteError:
-            logger.error(f"Unexpected error deleting preset '{name}': {PresetDeleteError}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Unexpected error deleting preset '{name}': {e}", exc_info=True)
             raise
 
     def load_all(self):
         """
-        Load all presets from disk.
-
-        Handles missing files and corrupted JSON with an empty dict. Validates dictionary
-
-        Returns:
-            dict: Dictionary of all presets, or empty dict if file doesn't exist or is invalid
+        Load all presets from disk
         """
         if not os.path.exists(self.path):
             logger.debug(
@@ -233,29 +195,23 @@ class PresetStore:
             logger.debug(f"Loaded {len(presets)} preset(s) from disk: {list(presets.keys())}")
             return presets
 
-        except json.JSONDecodeError as JSONDecodeError:
-            logger.error(f"JSON decode error reading {self.path}: {JSONDecodeError}", exc_info=True)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error reading {self.path}: {e}", exc_info=True)
             logger.warning("Returning empty preset dictionary due to corrupted file")
             return {}
-        except PermissionError as ErrorLoadingPresets:
-            logger.error(f"Permission denied reading {self.path}: {ErrorLoadingPresets}")
+        except PermissionError as e:
+            logger.error(f"Permission denied reading {self.path}: {e}")
             return {}
-        except IOError as FileIOError:
-            logger.error(f"IO error reading presets: {FileIOError}", exc_info=True)
+        except IOError as e:
+            logger.error(f"IO error reading presets: {e}", exc_info=True)
             return {}
-        except Exception as PresetSaveError:
-            logger.error(f"Unexpected error loading presets: {PresetSaveError}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Unexpected error loading presets: {e}", exc_info=True)
             return {}
 
     def get_preset(self, name):
         """
-        Get a specific preset by name.
-
-        Args:
-            name: Name of the preset to retrieve
-
-        Returns:
-            dict or None: Preset data if found, otherwise None
+        Get a specific preset by name
         """
         logger.debug(f"Retrieving preset: '{name}'")
         presets = self.load_all()
@@ -269,10 +225,7 @@ class PresetStore:
 
     def list_preset_names(self):
         """
-        Get a list of all preset names.
-
-        Returns:
-            list: List of preset names
+        Get a list of all preset names
         """
         presets = self.load_all()
         names = list(presets.keys())

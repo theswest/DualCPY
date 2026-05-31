@@ -1,4 +1,4 @@
-# ThorCPY – Dual-screen scrcpy docking and control UI for Windows
+# ThorCPY - Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #
@@ -17,71 +17,63 @@
 
 # src/config.py
 
-import json
 import os
+import json
 import logging
 
-JSON_INDENT = 4 # Indent size of the JSON file
-DEFAULT_ENCODING = "utf-8" # Default encoding used
+JSON_INDENT = 4
+DEFAULT_ENCODING = "utf-8"
 
 logger = logging.getLogger(__name__)
 
 class ConfigManager:
-    """Manages configuration settings"""
+    """Manages config settings."""
 
     def __init__(self, path):
         self.path = path
         logger.info(f"Initializing ConfigManager with path: {path}")
-
-        # Ensure directory exists
         try:
             dir_path = os.path.dirname(self.path)
             if dir_path:
                 os.makedirs(dir_path, exist_ok=True)
-        except Exception as directoryError:
-            logger.error(f"Failed to create config directory: {directoryError}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Failed to create config directory: {e}", exc_info=True)
             raise
 
     def load(self):
-        """Load config file"""
-        # Check to see if file exists
+        """Load config file, returns {} if there's a missing file or error"""
         if not os.path.exists(self.path):
             logger.debug(f"Config file does not exist: {self.path}, returning defaults")
             return {}
-
-        # Try to open the file
         try:
-            with open(self.path, "r", encoding="utf-8") as file:
-                config = json.load(file)
+            with open(self.path, "r", encoding=DEFAULT_ENCODING) as f:
+                config = json.load(f)
             logger.debug(f"Loaded config: {config}")
             return config
-        except json.JSONDecodeError as JSONDecodeError:
-            logger.error(f"JSON decode error reading {self.path}: {JSONDecodeError}", exc_info=True)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error reading {self.path}: {e}", exc_info=True)
             return {}
-        except Exception as JSONDecodeException:
-            logger.error(f"Error loading config: {JSONDecodeException}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Error loading config: {e}", exc_info=True)
             return {}
 
     def save(self, config):
-        """Save config to disk"""
+        """Save config"""
         try:
             logger.info(f"Saving config: {config}")
-            with open(self.path, "w", encoding=DEFAULT_ENCODING) as file:
-                json.dump(config, file, indent=JSON_INDENT)
+            with open(self.path, "w", encoding=DEFAULT_ENCODING) as f:
+                json.dump(config, f, indent=JSON_INDENT)
             logger.info("Config saved successfully")
-        except Exception as SaveConfigError:
-            logger.error(f"Failed to save config: {SaveConfigError}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Failed to save config: {e}", exc_info=True)
             raise
 
-    # Get a value
     def get(self, key, default=None):
-        """Get a config value"""
-        config = self.load()
-        return config.get(key, default)
+        """Get a single config value."""
+        return self.load().get(key, default)
 
-    # Set a value
     def set(self, key, value):
-        """Set a config value"""
+        """Set a single config value."""
         config = self.load()
         config[key] = value
         self.save(config)

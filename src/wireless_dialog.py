@@ -17,21 +17,20 @@
 
 # src/wireless_dialog.py
 
-import customtkinter as ctk
-import tkinter as tk
-import logging
 import re
 import ctypes
+import logging
+import customtkinter as ctk
 
-from src.ui_ctk import (
+from src.win32_darkmode import enable_dark_titlebar
+from src.control_panel import (
     BG_COLOUR, PANEL_COLOUR, BORDER_COLOUR, TEXT_COLOUR,
     ACCENT_COLOUR, ACCENT2_COLOUR,
     SUCCESS_COLOUR, DANGER_COLOUR, WARNING_COLOUR,
-    make_font, load_calsans, ICON_PATH,
+    make_font, load_calsans, apply_window_icon,
 )
 
 try:
-    from src.win32_darkmode import enable_dark_titlebar
     _HAS_DARK_TITLEBAR = True
 except Exception:
     _HAS_DARK_TITLEBAR = False
@@ -45,12 +44,6 @@ DEFAULT_CONNECT_PORT = "5555"
 DIALOG_WIDTH = 600
 DIALOG_HEIGHT = 680
 DIALOG_MIN_HEIGHT = 580
-
-# Status colours (map to the shared palette where possible)
-COLOUR_SUCCESS = SUCCESS_COLOUR
-COLOUR_WARNING = WARNING_COLOUR
-COLOUR_ERROR = DANGER_COLOUR
-COLOUR_INFO = ACCENT2_COLOUR
 
 
 class WirelessConnectionDialog:
@@ -84,11 +77,7 @@ class WirelessConnectionDialog:
         y = (self.dialog.winfo_screenheight() // 2) - (DIALOG_HEIGHT // 2)
         self.dialog.geometry(f"+{x}+{y}")
 
-        try:
-            img = tk.PhotoImage(file=ICON_PATH)
-            self.dialog.iconphoto(True, img)
-        except Exception:
-            pass
+        apply_window_icon(self.dialog)
 
         if parent:
             self.dialog.transient(parent)
@@ -346,10 +335,9 @@ class WirelessConnectionDialog:
     def _load_inputs(self):
         """
         Populate fields in priority order:
-          1. Active wireless connection — autofill Connect IP + port from live serial
-          2. Saved config values
-          3. Default port 5555, everything else empty
-        Pairing code is never saved or pre-filled.
+        1) Active wireless connection - autofill Connect IP + port from live serial
+        2) Saved config values
+        3) Default port 5555, everything else empty
         """
         serial = self.scrcpy_manager.serial
         mode   = self.scrcpy_manager.connection_mode
@@ -400,15 +388,15 @@ class WirelessConnectionDialog:
             disc_state = "disabled"
         elif self.scrcpy_manager.connection_mode == "wireless":
             text  = f"Connected wirelessly to: {self.scrcpy_manager.serial}"
-            color = COLOUR_SUCCESS
+            color = SUCCESS_COLOUR
             disc_state = "normal"
         elif self.scrcpy_manager.connection_mode == "usb":
             text  = f"Connected via USB: {self.scrcpy_manager.serial}"
-            color = COLOUR_WARNING
+            color = WARNING_COLOUR
             disc_state = "disabled"
         else:
             text  = f"Connected: {self.scrcpy_manager.serial} (mode unknown)"
-            color = COLOUR_INFO
+            color = ACCENT2_COLOUR
             disc_state = "disabled"
 
         self.status_label.configure(text=text, text_color=color)
@@ -617,9 +605,7 @@ class WirelessConnectionDialog:
 
     def _simple_dialog(self, title, message, kind="info"):
         """
-        Minimal themed message dialog using CTkToplevel.
-        kind: 'info' | 'error' | 'yesno'
-        Returns True/False for yesno, None otherwise.
+        Simple themed message dialog
         """
         result_holder = [None]
 
@@ -630,6 +616,8 @@ class WirelessConnectionDialog:
         win.grab_set()
         win.lift()
         win.focus_force()
+
+        apply_window_icon(win)
 
         # Dark titlebar
         try:
@@ -699,7 +687,6 @@ class WirelessConnectionDialog:
 def show_wireless_dialog(parent=None, scrcpy_manager=None, config=None):
     """
     Show the wireless connection dialog.
-    parent is optional, scrcpy_manager is required, config is optional for persisting inputs.
     """
     if not scrcpy_manager:
         logger.error("Cannot show wireless dialog: no scrcpy_manager provided")
