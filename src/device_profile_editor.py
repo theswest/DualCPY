@@ -179,7 +179,7 @@ class DeviceProfileEditorDialog:
 
         self._build_form()
 
-        # --- Pinned footer (always visible at the bottom) ---
+        # Pinned footer (always visible at the bottom)
         self._footer = ctk.CTkFrame(self._dialog, fg_color="transparent")
         self._footer.pack(side="bottom", fill="x")
 
@@ -463,7 +463,7 @@ class DeviceProfileEditorDialog:
             font=make_font(13, "bold"),
         )
         self._form_scroll.pack(fill="both", expand=True, padx=20, before=self._footer)
-        # Swap New Profile -> Save Changes in the footer
+        # Swap New Profile and Save Changes in the footer
         self._new_profile_btn.pack_forget()
         self._save_btn.pack(fill="x", padx=20, pady=(0, 4), in_=self._footer, after=self._error_label)
 

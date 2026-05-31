@@ -141,7 +141,7 @@ class DeviceProfileDialog:
 
     # UI construction
     def _build(self):
-        # --- Pinned header (title + divider) ---
+        # Pinned header
         title_row = ctk.CTkFrame(self._dialog, fg_color="transparent")
         title_row.pack(fill="x", padx=20, pady=(18, 4))
         ctk.CTkLabel(
@@ -152,7 +152,7 @@ class DeviceProfileDialog:
             fill="x", padx=20, pady=(0, 4)
         )
 
-        # --- Pinned footer (error + buttons) ---
+        # Pinned footer
         footer = ctk.CTkFrame(self._dialog, fg_color="transparent")
         footer.pack(side="bottom", fill="x")
 
@@ -183,14 +183,14 @@ class DeviceProfileDialog:
             text_color="white", font=make_font(13, "bold"),
         ).grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
-        # --- Scrollable body ---
+        # Scrollable body
         scroll = ctk.CTkScrollableFrame(
             self._dialog,
             fg_color="transparent",
             scrollbar_button_color=BORDER_COLOUR,
         )
         scroll.pack(fill="both", expand=True)
-        # Scroll isolation: only active while mouse is inside
+        
         def _scroll(event):
             scroll._parent_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
             return "break"
