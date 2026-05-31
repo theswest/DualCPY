@@ -371,9 +371,61 @@ class ScrcpyManager:
             logger.error(f"Error getting device IP: {GetIPError}")
             return None
 
+    @staticmethod
+    def default_args(
+        width: int,
+        height: int,
+        bitrate_min: int,
+        bitrate_scale: int,
+        enable_audio: bool,
+    ) -> list[str]:
+        """
+        Returns the default editable scrcpy args for a single screen.
+        Called by profile dialogs to pre-populate the args textboxes.
+        """
+        pixels = width * height
+        bitrate_mbps = max(bitrate_min, int(pixels / 1e6 * bitrate_scale * BITRATE_CALC_SCALE_FACTOR))
+
+        codec_options = (
+            "low-latency=1,"
+            "priority=0,"
+            "operating-rate=120,"
+            "bitrate-mode=2,"
+            "complexity=0,"
+            "i-frame-interval=10,"
+            "intra-refresh-period=60"
+        )
+
+        args = [
+            f"--video-bit-rate={bitrate_mbps}M",
+            f"--render-driver={DEFAULT_RENDER_DRIVER}",
+            f"--video-codec={DEFAULT_VIDEO_CODEC}",
+            f"--video-codec-options={codec_options}",
+            "--no-mipmaps",
+            "--no-power-on",
+            "--no-cleanup",
+            "--print-fps",
+            "--audio-bit-rate=256K" if enable_audio else "--no-audio",
+        ]
+        return args
+
     def _window_titles(self):
         name = self.profile.name
         return f"{name} - Top Screen - DualCPY", f"{name} - Bottom Screen - DualCPY"
+
+    def _read_last_log(self):
+        """Pull the last few lines from the most recent scrcpy log file."""
+        try:
+            if not self._scrcpy_log_handles:
+                return ""
+            handle = self._scrcpy_log_handles[-1]
+            handle.flush()
+            path = handle.name
+            with open(path, "r", errors="replace") as f:
+                lines = f.readlines()
+            return "".join(lines[-10:]).strip()
+        except Exception:
+            return ""
 
     def start_scrcpy(self, serial=None):
         """
@@ -400,15 +452,17 @@ class ScrcpyManager:
 
         # Launch top screen
         logger.info("Starting top screen window")
+        top_args = profile.extra_scrcpy_args_top or self.default_args(
+            self.f_w1, self.f_h1, TOP_BITRATE_MINIMUM, TOP_BITRATE_SCALE,
+            enable_audio=self.enable_audio_top,
+        )
         self._start_window(
             use_serial,
             profile.top_display_id,
             top_title,
             self.f_w1,
             self.f_h1,
-            enable_audio=self.enable_audio_top,
-            bitrate_min=TOP_BITRATE_MINIMUM,
-            bitrate_scale=TOP_BITRATE_SCALE,
+            extra_args=top_args,
             max_fps_override=self.max_fps,
         )
 
@@ -430,15 +484,17 @@ class ScrcpyManager:
 
         # Launch bottom screen
         logger.info("Starting bottom screen window")
+        bottom_args = profile.extra_scrcpy_args_bottom or self.default_args(
+            self.f_w2, self.f_h2, BOTTOM_BITRATE_MINIMUM, BOTTOM_BITRATE_SCALE,
+            enable_audio=False,
+        )
         self._start_window(
             use_serial,
             profile.bottom_display_id,
             bottom_title,
             self.f_w2,
             self.f_h2,
-            enable_audio=False,
-            bitrate_min=BOTTOM_BITRATE_MINIMUM,
-            bitrate_scale=BOTTOM_BITRATE_SCALE,
+            extra_args=bottom_args,
         )
 
         logger.info("All scrcpy windows started successfully")
@@ -451,57 +507,27 @@ class ScrcpyManager:
             window_title,
             width,
             height,
-            enable_audio=False,
-            bitrate_min=8,
-            bitrate_scale=32,
+            extra_args: list = None,
             max_fps_override=None,
     ):
         """
-        Start a single scrcpy window with retry logic
+        Start a single scrcpy window with retry logic.
+        extra_args are the fully editable per-screen scrcpy flags
+        (bitrate, codec, audio, etc.). Locked args (serial, display-id,
+        window-title, max-size, max-fps) are always applied separately.
         """
         label = f"'{window_title}'"
         logger.debug(f"Preparing to start {label} (display {display_id})")
 
-        # Calculate bitrate based on resolution
-        pixels = width * height
-        bitrate_mbps = max(bitrate_min, int(pixels / 1e6 * bitrate_scale * BITRATE_CALC_SCALE_FACTOR))
-        bitrate_str = f"{bitrate_mbps}M"
-        logger.debug(f"{label} bitrate: {bitrate_str}")
-
-        # Build command and codec options
-
-        codec_options = (
-            "low-latency=1,"
-            "priority=0,"
-            "operating-rate=120,"
-            "bitrate-mode=2,"
-            "complexity=0,"
-            "i-frame-interval=10,"
-            "intra-refresh-period=60"
-        )
-
         cmd = [
             self.scrcpy_bin,
-            "--serial", serial,
-            "--display-id", display_id,
+            "--serial",       serial,
+            "--display-id",   display_id,
             "--window-title", window_title,
-            "--max-size", f"{width}",
-            "--video-bit-rate", bitrate_str,
-            "--max-fps", str(max_fps_override if max_fps_override is not None else self.max_fps),
-            "--render-driver", DEFAULT_RENDER_DRIVER,
-            "--video-codec", DEFAULT_VIDEO_CODEC,
-            f"--video-codec-options={codec_options}",
-            "--no-mipmaps",
-            "--no-power-on",
-            "--no-cleanup",
-            "--print-fps",
+            "--max-size",     f"{width}",
+            "--max-fps",      str(max_fps_override if max_fps_override is not None else self.max_fps),
+            *(extra_args or []),
         ]
-
-        # Audio settings
-        if enable_audio:
-            cmd.append("--audio-bit-rate=256K")
-        else:
-            cmd.append("--no-audio")
 
         logger.debug(f"Command: {' '.join(cmd)}")
 
@@ -576,8 +602,10 @@ class ScrcpyManager:
                 # Quick check if process survives startup
                 time.sleep(SCRCPY_CREATION_DELAY)
                 if proc.poll() is not None:
+                    log_tail = self._read_last_log()
                     raise RuntimeError(
                         f"Scrcpy {label} process died immediately (exit code: {proc.poll()})"
+                        + (f"\n\nScrcpy output:\n{log_tail}" if log_tail else "")
                     )
 
                 # Start process hidden

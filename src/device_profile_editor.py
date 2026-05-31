@@ -23,6 +23,11 @@ import tkinter as tk
 import customtkinter as ctk
 
 from src.device_profile import DeviceProfile
+from src.scrcpy_manager import (
+    ScrcpyManager,
+    TOP_BITRATE_MINIMUM, TOP_BITRATE_SCALE,
+    BOTTOM_BITRATE_MINIMUM, BOTTOM_BITRATE_SCALE,
+)
 from src.device_profile import BUILTIN_PROFILES
 from src.device_profile_dialog import DeviceProfileDialog
 from src.device_detection import detect_device, get_device_info, get_display_list, resolve_adb
@@ -64,7 +69,7 @@ class DeviceProfileEditorDialog:
         self._dialog.title("Edit Device Profiles")
         self._dialog.configure(fg_color=BG_COLOUR)
         self._dialog.resizable(True, True)
-        self._dialog.minsize(DIALOG_WIDTH, DIALOG_HEIGHT)
+        self._dialog.minsize(DIALOG_WIDTH, 600)
 
         self._dialog.update_idletasks()
         sw = self._dialog.winfo_screenwidth()
@@ -118,8 +123,16 @@ class DeviceProfileEditorDialog:
             height=280,
             scrollbar_button_color=BORDER_COLOUR,
         )
-        self._list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 8))
+        self._list_frame.pack(fill="x", padx=20, pady=(0, 8))
         self._list_frame.columnconfigure(0, weight=1)
+        # Scroll isolation: only scroll this list while mouse is inside it
+        def _lf_scroll(event):
+            self._list_frame._parent_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            return "break"
+        self._list_frame._parent_canvas.bind("<Enter>",
+            lambda e: self._list_frame._parent_canvas.bind("<MouseWheel>", _lf_scroll))
+        self._list_frame._parent_canvas.bind("<Leave>",
+            lambda e: self._list_frame._parent_canvas.unbind("<MouseWheel>"))
 
         # Edit form (bottom half) - hidden until a profile is selected
         ctk.CTkFrame(self._dialog, height=1, fg_color=BORDER_COLOUR).pack(
@@ -132,8 +145,22 @@ class DeviceProfileEditorDialog:
         )
         self._form_label.pack(anchor="w", padx=20, pady=(0, 4))
 
-        self._form_frame = ctk.CTkFrame(self._dialog, fg_color="transparent")
-        self._form_frame.pack(fill="x", padx=20)
+        self._form_scroll = ctk.CTkScrollableFrame(
+            self._dialog,
+            fg_color="transparent",
+            scrollbar_button_color=BORDER_COLOUR,
+        )
+        # Scroll isolation for the form scroll itself — only active while mouse is inside.
+        def _fs_scroll(event):
+            self._form_scroll._parent_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            return "break"
+        self._form_scroll._parent_canvas.bind("<Enter>",
+            lambda e: self._form_scroll._parent_canvas.bind("<MouseWheel>", _fs_scroll))
+        self._form_scroll._parent_canvas.bind("<Leave>",
+            lambda e: self._form_scroll._parent_canvas.unbind("<MouseWheel>"))
+        # form_frame lives inside the scrollable container
+        self._form_frame = ctk.CTkFrame(self._form_scroll, fg_color="transparent")
+        self._form_frame.pack(fill="x", padx=4)
         self._form_frame.columnconfigure(1, weight=1)
 
         # Form fields (built once, shown/hidden with grid_remove/grid)
@@ -152,35 +179,40 @@ class DeviceProfileEditorDialog:
 
         self._build_form()
 
-        # Error label
+        # --- Pinned footer (always visible at the bottom) ---
+        self._footer = ctk.CTkFrame(self._dialog, fg_color="transparent")
+        self._footer.pack(side="bottom", fill="x")
+
+        ctk.CTkFrame(self._footer, height=1, fg_color=BORDER_COLOUR).pack(
+            fill="x", padx=20, pady=(4, 4)
+        )
+
+        # Error label in footer so it's never cut off
         self._error_label = ctk.CTkLabel(
-            self._dialog, textvariable=self._error_var,
+            self._footer, textvariable=self._error_var,
             text_color=DANGER_COLOUR, font=make_font(12),
         )
-        self._error_label.pack(pady=(4, 0))
+        self._error_label.pack(pady=(0, 2))
 
-        # Save button (shown only when editing)
+        # "New Profile" and "Save Changes" share the same slot, toggled during editing
+        self._new_profile_btn = ctk.CTkButton(
+            self._footer, text="New Profile",
+            command=self._on_new_profile,
+            fg_color=ACCENT_COLOUR, hover_color=ACCENT2_COLOUR,
+            text_color="white", font=make_font(13, "bold"),
+        )
+        self._new_profile_btn.pack(fill="x", padx=20, pady=(0, 4))
+
         self._save_btn = ctk.CTkButton(
-            self._dialog, text="Save Changes",
+            self._footer, text="Save Changes",
             command=self._on_save,
             fg_color=ACCENT_COLOUR, hover_color=ACCENT2_COLOUR,
             text_color="white", font=make_font(13, "bold"),
         )
+        # _save_btn is packed only when editing begins
 
         ctk.CTkButton(
-            self._dialog,
-            text="New Profile",
-            command=self._on_new_profile,
-            fg_color=ACCENT_COLOUR,
-            hover_color=ACCENT2_COLOUR,
-        ).pack(fill="x", padx=20, pady=(0, 8))
-
-        # Close button always at the bottom
-        ctk.CTkFrame(self._dialog, height=1, fg_color=BORDER_COLOUR).pack(
-            fill="x", padx=20, pady=(8, 4)
-        )
-        ctk.CTkButton(
-            self._dialog, text="Close",
+            self._footer, text="Close",
             command=self._dialog.destroy,
             fg_color=PANEL_COLOUR, hover_color=BORDER_COLOUR,
             border_color=BORDER_COLOUR, border_width=1,
@@ -265,8 +297,46 @@ class DeviceProfileEditorDialog:
         # Row 8: Default scale
         field("Default scale", self._scale_var, 8)
 
-        # Hide initially
-        self._form_frame.pack_forget()
+        # Rows 9-12: Per-screen args textboxes
+        for label, attr in [
+            ("Top screen args",    "_top_args_box"),
+            ("Bottom screen args", "_bottom_args_box"),
+        ]:
+            r_label = 9 if "Top" in label else 11
+            r_box   = 10 if "Top" in label else 12
+            ctk.CTkLabel(
+                row, text=label,
+                font=make_font(12), text_color=TEXT_COLOUR,
+                width=130, anchor="w",
+            ).grid(row=r_label, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+            box = ctk.CTkTextbox(
+                row,
+                height=120,
+                fg_color=PANEL_COLOUR,
+                border_color=BORDER_COLOUR,
+                text_color=TEXT_COLOUR,
+                font=make_font(11),
+                wrap="none",
+            )
+            box.grid(row=r_box, column=0, columnspan=2, sticky="ew", pady=(2, 4))
+            # Scroll isolation: only scroll this textbox while the mouse is inside it.
+            def _bind_enter_leave(b=box):
+                inner = b._textbox
+                def _scroll(event):
+                    inner.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                    return "break"
+                def _on_enter(e):
+                    inner.bind("<MouseWheel>", _scroll)
+                def _on_leave(e):
+                    inner.unbind("<MouseWheel>")
+                inner.bind("<Enter>", _on_enter)
+                inner.bind("<Leave>", _on_leave)
+            _bind_enter_leave()
+            setattr(self, attr, box)
+
+        # Hide initially (form_scroll is not yet packed either)
+        pass
 
     # Profile list
     def _refresh_list(self):
@@ -348,6 +418,14 @@ class DeviceProfileEditorDialog:
                 ).grid(row=0, column=3 if self._launcher is not None else 2, padx=(0, 4))
 
     # Edit form population
+    @staticmethod
+    def _parse_args_box(box: ctk.CTkTextbox) -> list[str]:
+        raw = box.get("1.0", "end").strip()
+        args = [line.strip() for line in raw.splitlines() if line.strip()]
+        if args and args[0].lower() == "scrcpy":
+            args = args[1:]
+        return args
+
     def _load_for_editing(self, key: str, profile: DeviceProfile):
         self._editing_key = key
 
@@ -358,6 +436,10 @@ class DeviceProfileEditorDialog:
         self._flipped_var.set(profile.flipped_screens)
         self._slow_var.set(profile.screen_launch_delay >= SLOW_DELAY)
         self._scale_var.set(str(profile.default_ui_scale))
+        self._top_args_box.delete("1.0", "end")
+        self._top_args_box.insert("1.0", "\n".join(getattr(profile, "extra_scrcpy_args_top", [])))
+        self._bottom_args_box.delete("1.0", "end")
+        self._bottom_args_box.insert("1.0", "\n".join(getattr(profile, "extra_scrcpy_args_bottom", [])))
         self._error_var.set("")
 
         self._top_info_var.set(
@@ -380,8 +462,10 @@ class DeviceProfileEditorDialog:
             text_color=ACCENT2_COLOUR,
             font=make_font(13, "bold"),
         )
-        self._form_frame.pack(fill="x", padx=20, before=self._error_label)
-        self._save_btn.pack(fill="x", padx=20, pady=(8, 0), before=self._error_label)
+        self._form_scroll.pack(fill="both", expand=True, padx=20, before=self._footer)
+        # Swap New Profile -> Save Changes in the footer
+        self._new_profile_btn.pack_forget()
+        self._save_btn.pack(fill="x", padx=20, pady=(0, 4), in_=self._footer, after=self._error_label)
 
     # Callbacks
     def _on_new_profile(self):
@@ -447,6 +531,10 @@ class DeviceProfileEditorDialog:
             self._error_var.set("Bottom screen diagonal must be a positive number.")
             return
 
+        # Parse per-screen args
+        top_args    = self._parse_args_box(self._top_args_box)
+        bottom_args = self._parse_args_box(self._bottom_args_box)
+
         # Build updated profile
         updated = DeviceProfile(
             name=original.name,
@@ -462,6 +550,8 @@ class DeviceProfileEditorDialog:
             screen_launch_delay=SLOW_DELAY if self._slow_var.get() else FAST_DELAY,
             default_ui_scale=default_scale,
             nickname=self._nickname_var.get().strip(),
+            extra_scrcpy_args_top=top_args,
+            extra_scrcpy_args_bottom=bottom_args,
         )
 
         try:
@@ -477,8 +567,11 @@ class DeviceProfileEditorDialog:
 
         # Collapse the edit form and reset the label
         self._editing_key = None
+        self._form_scroll.pack_forget()
         self._form_frame.pack_forget()
         self._save_btn.pack_forget()
+        # Swap Save Changes -> New Profile
+        self._new_profile_btn.pack(fill="x", padx=20, pady=(0, 4), in_=self._footer, after=self._error_label)
         self._form_label.configure(
             text="Select a profile above to edit it",
             text_color=BORDER_COLOUR,
@@ -533,8 +626,11 @@ class DeviceProfileEditorDialog:
             # If we were editing this profile, hide the form
             if self._editing_key == key:
                 self._editing_key = None
+                self._form_scroll.pack_forget()
                 self._form_frame.pack_forget()
                 self._save_btn.pack_forget()
+                self._new_profile_btn.pack(fill="x", padx=20, pady=(0, 4), in_=self._footer, after=self._error_label)
+                self._new_profile_btn.pack(fill="x", padx=20, pady=(0, 4), before=self._error_label)
                 self._form_label.configure(
                     text="Select a profile above to edit it",
                     text_color=BORDER_COLOUR,

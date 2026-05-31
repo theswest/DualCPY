@@ -23,6 +23,11 @@ import tkinter as tk
 import customtkinter as ctk
 
 from src.device_profile import DeviceProfile
+from src.scrcpy_manager import (
+    ScrcpyManager,
+    TOP_BITRATE_MINIMUM, TOP_BITRATE_SCALE,
+    BOTTOM_BITRATE_MINIMUM, BOTTOM_BITRATE_SCALE,
+)
 from src.ui_constants import (
     BG_COLOUR, PANEL_COLOUR, BORDER_COLOUR, TEXT_COLOUR,
     ACCENT_COLOUR, ACCENT2_COLOUR, DANGER_COLOUR,
@@ -41,7 +46,7 @@ DEFAULT_UI_SCALE   = 0.5
 SLOW_DEVICE_DELAY  = 3
 FAST_DEVICE_DELAY  = 0
 DIALOG_WIDTH       = 480
-DIALOG_HEIGHT      = 580
+DIALOG_HEIGHT      = 620
 
 
 class DeviceProfileDialog:
@@ -68,7 +73,7 @@ class DeviceProfileDialog:
 
         self._dialog.title("New Device Profile")
         self._dialog.configure(fg_color=BG_COLOUR)
-        self._dialog.resizable(False, False)
+        self._dialog.resizable(False, True)
 
         # Centre on screen
         self._dialog.update_idletasks()
@@ -136,26 +141,70 @@ class DeviceProfileDialog:
 
     # UI construction
     def _build(self):
-        pad = {"padx": 20, "pady": 6}
-
-        # Title
+        # --- Pinned header (title + divider) ---
         title_row = ctk.CTkFrame(self._dialog, fg_color="transparent")
         title_row.pack(fill="x", padx=20, pady=(18, 4))
-
         ctk.CTkLabel(
             title_row, text="New Device Profile",
             font=make_font(20, "bold"), text_color=ACCENT2_COLOUR,
         ).pack(side="left")
+        ctk.CTkFrame(self._dialog, height=1, fg_color=BORDER_COLOUR).pack(
+            fill="x", padx=20, pady=(0, 4)
+        )
 
-        ctk.CTkFrame(
-            self._dialog, height=1, fg_color=BORDER_COLOUR
-        ).pack(fill="x", padx=20, pady=(0, 8))
+        # --- Pinned footer (error + buttons) ---
+        footer = ctk.CTkFrame(self._dialog, fg_color="transparent")
+        footer.pack(side="bottom", fill="x")
+
+        ctk.CTkFrame(footer, height=1, fg_color=BORDER_COLOUR).pack(
+            fill="x", padx=20, pady=(4, 4)
+        )
+        self._error_label = ctk.CTkLabel(
+            footer, textvariable=self._error_var,
+            text_color=DANGER_COLOUR, font=make_font(12),
+        )
+        self._error_label.pack(pady=(0, 2))
+
+        btn_row = ctk.CTkFrame(footer, fg_color="transparent")
+        btn_row.pack(fill="x", padx=20, pady=(0, 16))
+        btn_row.columnconfigure(0, weight=1)
+        btn_row.columnconfigure(1, weight=1)
+        ctk.CTkButton(
+            btn_row, text="Cancel",
+            command=self._on_cancel,
+            fg_color=PANEL_COLOUR, hover_color=BORDER_COLOUR,
+            border_color=BORDER_COLOUR, border_width=1,
+            text_color=TEXT_COLOUR, font=make_font(13),
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ctk.CTkButton(
+            btn_row, text="Save Profile",
+            command=self._on_save,
+            fg_color=ACCENT_COLOUR, hover_color=ACCENT2_COLOUR,
+            text_color="white", font=make_font(13, "bold"),
+        ).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+
+        # --- Scrollable body ---
+        scroll = ctk.CTkScrollableFrame(
+            self._dialog,
+            fg_color="transparent",
+            scrollbar_button_color=BORDER_COLOUR,
+        )
+        scroll.pack(fill="both", expand=True)
+        # Scroll isolation: only active while mouse is inside
+        def _scroll(event):
+            scroll._parent_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            return "break"
+        scroll._parent_canvas.bind("<Enter>",
+            lambda e: scroll._parent_canvas.bind("<MouseWheel>", _scroll))
+        scroll._parent_canvas.bind("<Leave>",
+            lambda e: scroll._parent_canvas.unbind("<MouseWheel>"))
+        # Use scroll as the parent for all body widgets
+        self._body = scroll
 
         # Device name (read-only) + nickname
-        name_row = ctk.CTkFrame(self._dialog, fg_color="transparent")
+        name_row = ctk.CTkFrame(self._body, fg_color="transparent")
         name_row.pack(fill="x", padx=20, pady=4)
         name_row.columnconfigure(1, weight=1)
-
         ctk.CTkLabel(
             name_row, text="Device Name",
             font=make_font(13), text_color=TEXT_COLOUR,
@@ -170,89 +219,46 @@ class DeviceProfileDialog:
         self._field_row("Default scale", self._scale_var)
 
         # Separator
-        ctk.CTkFrame(
-            self._dialog, height=1, fg_color=BORDER_COLOUR
-        ).pack(fill="x", padx=20, pady=(8, 4))
+        ctk.CTkFrame(self._body, height=1, fg_color=BORDER_COLOUR).pack(
+            fill="x", padx=20, pady=(8, 4)
+        )
 
         # Screen panels
-        screens_frame = ctk.CTkFrame(self._dialog, fg_color="transparent")
+        screens_frame = ctk.CTkFrame(self._body, fg_color="transparent")
         screens_frame.pack(fill="x", padx=20, pady=4)
         screens_frame.columnconfigure(0, weight=1)
         screens_frame.columnconfigure(1, weight=1)
 
         self._top_panel    = self._screen_panel(screens_frame, "Top Screen",
-                                                self._top_id_var,
-                                                self._top_res_var,
+                                                self._top_id_var, self._top_res_var,
                                                 self._top_size_var, col=0)
         self._bottom_panel = self._screen_panel(screens_frame, "Bottom Screen",
-                                                self._bottom_id_var,
-                                                self._bottom_res_var,
+                                                self._bottom_id_var, self._bottom_res_var,
                                                 self._bottom_size_var, col=1)
 
         # Toggles
-        ctk.CTkFrame(
-            self._dialog, height=1, fg_color=BORDER_COLOUR
-        ).pack(fill="x", padx=20, pady=(8, 4))
-
-        toggles = ctk.CTkFrame(self._dialog, fg_color="transparent")
+        ctk.CTkFrame(self._body, height=1, fg_color=BORDER_COLOUR).pack(
+            fill="x", padx=20, pady=(8, 4)
+        )
+        toggles = ctk.CTkFrame(self._body, fg_color="transparent")
         toggles.pack(fill="x", padx=20, pady=4)
-
         self._toggle_row(
-            toggles,
-            label="Internal Screen on Bottom (flip displays)",
-            var=self._flipped_var,
-            on_change=self._on_flip_toggle,
-            row=0,
+            toggles, label="Internal Screen on Bottom (flip displays)",
+            var=self._flipped_var, on_change=self._on_flip_toggle, row=0,
         )
         self._toggle_row(
-            toggles,
-            label="Slow device (adds launch delay between screens)",
-            var=self._slow_var,
-            on_change=None,
-            row=1,
+            toggles, label="Slow device (adds launch delay between screens)",
+            var=self._slow_var, on_change=None, row=1,
         )
 
-        # Error label
-        self._error_label = ctk.CTkLabel(
-            self._dialog,
-            textvariable=self._error_var,
-            text_color=DANGER_COLOUR,
-            font=make_font(12),
+        # Per-screen args textboxes (at the bottom)
+        ctk.CTkFrame(self._body, height=1, fg_color=BORDER_COLOUR).pack(
+            fill="x", padx=20, pady=(8, 4)
         )
-        self._error_label.pack(pady=(4, 0))
-
-        # Buttons
-        ctk.CTkFrame(
-            self._dialog, height=1, fg_color=BORDER_COLOUR
-        ).pack(fill="x", padx=20, pady=(8, 4))
-
-        btn_row = ctk.CTkFrame(self._dialog, fg_color="transparent")
-        btn_row.pack(fill="x", padx=20, pady=(4, 16))
-        btn_row.columnconfigure(0, weight=1)
-        btn_row.columnconfigure(1, weight=1)
-
-        ctk.CTkButton(
-            btn_row, text="Cancel",
-            command=self._on_cancel,
-            fg_color=PANEL_COLOUR,
-            hover_color=BORDER_COLOUR,
-            border_color=BORDER_COLOUR,
-            border_width=1,
-            text_color=TEXT_COLOUR,
-            font=make_font(13),
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-
-        ctk.CTkButton(
-            btn_row, text="Save Profile",
-            command=self._on_save,
-            fg_color=ACCENT_COLOUR,
-            hover_color=ACCENT2_COLOUR,
-            text_color="white",
-            font=make_font(13, "bold"),
-        ).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self._build_args_boxes()
 
     def _field_row(self, label_text: str, var: tk.StringVar):
-        row = ctk.CTkFrame(self._dialog, fg_color="transparent")
+        row = ctk.CTkFrame(self._body, fg_color="transparent")
         row.pack(fill="x", padx=20, pady=4)
         row.columnconfigure(1, weight=1)
 
@@ -269,6 +275,61 @@ class DeviceProfileDialog:
             text_color=TEXT_COLOUR,
             font=make_font(13),
         ).grid(row=0, column=1, sticky="ew", padx=(10, 0))
+
+    def _build_args_boxes(self):
+        """Build per-screen args textboxes pre-populated with default args."""
+        top_disp = self._display_list[0]
+        bot_disp = self._display_list[1]
+
+        top_defaults = "\n".join(ScrcpyManager.default_args(
+            top_disp["width"], top_disp["height"],
+            TOP_BITRATE_MINIMUM, TOP_BITRATE_SCALE,
+            enable_audio=True,
+        ))
+        bottom_defaults = "\n".join(ScrcpyManager.default_args(
+            bot_disp["width"], bot_disp["height"],
+            BOTTOM_BITRATE_MINIMUM, BOTTOM_BITRATE_SCALE,
+            enable_audio=False,
+        ))
+
+        for label, defaults, attr in [
+            ("Top screen args",    top_defaults,    "_top_args_box"),
+            ("Bottom screen args", bottom_defaults, "_bottom_args_box"),
+        ]:
+            ctk.CTkLabel(
+                self._body, text=label,
+                font=make_font(12), text_color=TEXT_COLOUR, anchor="w",
+            ).pack(anchor="w", padx=20, pady=(6, 0))
+
+            box = ctk.CTkTextbox(
+                self._body,
+                height=130,
+                fg_color=PANEL_COLOUR,
+                border_color=BORDER_COLOUR,
+                text_color=TEXT_COLOUR,
+                font=make_font(11),
+                wrap="none",
+            )
+            box.pack(fill="x", padx=20, pady=(2, 0))
+            box.insert("1.0", defaults)
+            # Scroll isolation: textbox scrolls independently on hover
+            def _bind_box(b=box):
+                inner = b._textbox
+                def _s(event):
+                    inner.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                    return "break"
+                inner.bind("<Enter>", lambda e: inner.bind("<MouseWheel>", _s))
+                inner.bind("<Leave>", lambda e: inner.unbind("<MouseWheel>"))
+            _bind_box()
+            setattr(self, attr, box)
+
+    @staticmethod
+    def _parse_args_box(box: ctk.CTkTextbox) -> list[str]:
+        raw = box.get("1.0", "end").strip()
+        args = [line.strip() for line in raw.splitlines() if line.strip()]
+        if args and args[0].lower() == "scrcpy":
+            args = args[1:]
+        return args
 
     def _screen_panel(self, parent, title: str,
                       id_var, res_var, size_var, col: int):
@@ -359,6 +420,10 @@ class DeviceProfileDialog:
             self._error_var.set("Default scale must be a positive number (e.g. 0.6).")
             return
 
+        # Parse per-screen args
+        top_args    = self._parse_args_box(self._top_args_box)
+        bottom_args = self._parse_args_box(self._bottom_args_box)
+
         # Validate sizes
         try:
             top_size = float(self._top_size_var.get().strip())
@@ -393,6 +458,8 @@ class DeviceProfileDialog:
             screen_launch_delay=SLOW_DEVICE_DELAY if self._slow_var.get() else FAST_DEVICE_DELAY,
             default_ui_scale=default_scale,
             nickname=self._nickname_var.get().strip(),
+            extra_scrcpy_args_top=top_args,
+            extra_scrcpy_args_bottom=bottom_args,
         )
 
         logger.info(f"DeviceProfileDialog: saving new profile '{name}'")

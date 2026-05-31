@@ -18,7 +18,7 @@
 # src/device_profile.py
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class DeviceProfile:
@@ -35,6 +35,8 @@ class DeviceProfile:
     screen_launch_delay: int
     default_ui_scale: float
     nickname: str = ""
+    extra_scrcpy_args_top: list[str] = field(default_factory=list)
+    extra_scrcpy_args_bottom: list[str] = field(default_factory=list)
 
     def get_screen_width_ratio(self):
         top_ppi = math.sqrt(self.top_screen_width**2 + self.top_screen_height**2) / self.top_screen_size

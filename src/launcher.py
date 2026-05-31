@@ -38,6 +38,7 @@ from src.wireless_dialog import show_wireless_dialog
 from src.device_selector import show_device_selector
 from src.custom_profile_store import CustomProfileStore
 from src.control_panel import show_loading_screen, CTkUI
+from src.device_profile_editor import DeviceProfileEditorDialog
 from src.win32_dock import Win32Dock, apply_docked_style, apply_undocked_style
 from src.device_detection import detect_device, resolve_adb, get_device_info, get_display_list
 
@@ -607,6 +608,22 @@ class Launcher:
             if self.hwnd_container:
                 self.user32.ShowWindow(self.hwnd_container, SW_SHOW)
 
+    def _launch_recovery_editor(self):
+        """
+        Open the profile editor as a recovery path when scrcpy fails to start.
+        """
+        if not getattr(self, "_hidden_ctk_root", None):
+            self._hidden_ctk_root = _ctk.CTk()
+            self._hidden_ctk_root.withdraw()
+
+        DeviceProfileEditorDialog(
+            parent=self._hidden_ctk_root,
+            custom_store=self.custom_profiles,
+            launcher=self,
+        ).run()
+
+        self.stop()
+
     def launch(self):
         self.running = True
         self._wndproc = self._create_wnd_proc()
@@ -788,7 +805,15 @@ class Launcher:
         # Start scrcpy
         if serial:
             logger.info(f"Starting scrcpy with device: {serial} (mode: {self.scrcpy.connection_mode})")
-            self.scrcpy.start_scrcpy(serial=serial)
+            try:
+                self.scrcpy.start_scrcpy(serial=serial)
+            except RuntimeError as e:
+                messagebox.showerror(
+                    "Scrcpy Failed to Start",
+                    str(e) + "\n\nThe profile editor will open so you can fix the extra args.",
+                )
+                self._launch_recovery_editor()
+                return
         else:
             logger.error("No device available to start scrcpy")
             self.stop()
@@ -900,7 +925,15 @@ class Launcher:
 
         # Start scrcpy
         try:
-            self.scrcpy.start_scrcpy(serial=serial)
+            try:
+                self.scrcpy.start_scrcpy(serial=serial)
+            except RuntimeError as e:
+                messagebox.showerror(
+                    "Scrcpy Failed to Start",
+                    str(e) + "\n\nThe profile editor will open so you can fix the extra args.",
+                )
+                self._launch_recovery_editor()
+                return
         except Exception as e:
             logger.error(f"Failed to restart scrcpy after profile switch: {e}")
             return
