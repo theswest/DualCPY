@@ -1,4 +1,4 @@
-# ThorCPY - Dual-screen scrcpy docking and control UI for Windows
+# DualCPY - Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #
@@ -99,7 +99,7 @@ def make_font(size, weight="normal"):
 
 
 def apply_window_icon(window):
-    """Apply the ThorCPY icon to any CTk window or Toplevel"""
+    """Apply the DualCPY icon to any CTk window or Toplevel"""
     try:
         img = tk.PhotoImage(file=ICON_PATH)
         window.iconphoto(True, img)

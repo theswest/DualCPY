@@ -1,4 +1,4 @@
-# ThorCPY - Dual-screen scrcpy docking and control UI for Windows
+# DualCPY - Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #

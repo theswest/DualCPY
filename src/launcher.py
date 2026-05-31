@@ -1,4 +1,4 @@
-# ThorCPY - Dual-screen scrcpy docking and control UI for Windows
+# DualCPY - Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #
@@ -85,7 +85,7 @@ HALF = 0.5
 
 class Launcher:
     """
-    Main window controller for ThorCPY
+    Main window controller for DualCPY
     Manages scrcpy instances, docking and undocking behabiour,
     UI rendering and event handling and configuration persistance
 
@@ -439,7 +439,7 @@ class Launcher:
             wc = WNDCLASSEX()
             wc.cbSize = ctypes.sizeof(WNDCLASSEX)
             wc.lpfnWndProc = ctypes.cast(self._wndproc, ctypes.c_void_p).value
-            wc.lpszClassName = "ThorCPYBridge"
+            wc.lpszClassName = "DualCPYBridge"
             hinst = self.kernel32.GetModuleHandleW(None)
             wc.hInstance = hinst
             wc.hbrBackground = ctypes.windll.gdi32.GetStockObject(BLACK_BRUSH)
@@ -460,8 +460,8 @@ class Launcher:
             # Create the container window
             hwnd = self.user32.CreateWindowExW(
                 WS_EX_CONTROLPARENT,
-                "ThorCPYBridge",
-                "ThorCPY",
+                "DualCPYBridge",
+                "DualCPY",
                 style,
                 DEFAULT_CONTAINER_X,
                 DEFAULT_CONTAINER_Y,

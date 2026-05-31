@@ -1,4 +1,4 @@
-# ThorCPY – Dual-screen scrcpy docking and control UI for Windows
+# DualCPY – Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #
@@ -25,7 +25,7 @@ PyInstaller.__main__.run(
         "--onedir",
         "--noconsole",
         "--clean",
-        "--name=ThorCPY",
+        "--name=DualCPY",
         "--add-data=config;config",
         "--add-data=bin;bin",
         "--add-data=logs;logs",

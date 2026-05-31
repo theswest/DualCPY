@@ -1,4 +1,4 @@
-# ThorCPY - Dual-screen scrcpy docking and control UI for Windows
+# DualCPY - Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #
@@ -373,7 +373,7 @@ class ScrcpyManager:
 
     def _window_titles(self):
         name = self.profile.name
-        return f"{name} - Top Screen - ThorCPY", f"{name} - Bottom Screen - ThorCPY"
+        return f"{name} - Top Screen - DualCPY", f"{name} - Bottom Screen - DualCPY"
 
     def start_scrcpy(self, serial=None):
         """

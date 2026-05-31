@@ -1,4 +1,4 @@
-# ThorCPY – Dual-screen scrcpy docking and control UI for Windows
+# DualCPY – Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #
@@ -446,9 +446,9 @@ class WirelessConnectionDialog:
                 self._msgbox_info(
                     "Connection Successful",
                     f"Successfully connected to {ip}:{port}\n\n"
-                    "You can now close the Wireless Connection Window and start using ThorCPY wirelessly!\n"
-                    "You may have to restart ThorCPY for changes to take effect.\n"
-                    "If the ThorCPY main window doesn't open check it's not open in the background!",
+                    "You can now close the Wireless Connection Window and start using DualCPY wirelessly!\n"
+                    "You may have to restart DualCPY for changes to take effect.\n"
+                    "If the DualCPY main window doesn't open check it's not open in the background!",
                 )
                 self.result = "connected"
                 self._update_status()
@@ -543,7 +543,7 @@ class WirelessConnectionDialog:
         if self._msgbox_yesno(
             "Disconnect Device?",
             f"Are you sure you want to disconnect from:\n\n{self.scrcpy_manager.serial}\n\n"
-            "You'll need to reconnect to use ThorCPY wirelessly again.",
+            "You'll need to reconnect to use DualCPY wirelessly again.",
         ):
             logger.info("Disconnecting wireless device")
             success = self.scrcpy_manager.disconnect_wireless()
@@ -559,7 +559,7 @@ class WirelessConnectionDialog:
                 self._msgbox_error(
                     "Disconnection Failed",
                     "Failed to disconnect the device.\n\n"
-                    "Try restarting ThorCPY if the problem persists.",
+                    "Try restarting DualCPY if the problem persists.",
                 )
 
     def _on_close(self):
@@ -574,16 +574,16 @@ class WirelessConnectionDialog:
         except Exception as e:
             logger.warning(f"Error destroying dialog: {e}")
 
-        # Bring the main ThorCPY Control Panel window back to foreground
+        # Bring the main DualCPY Control Panel window back to foreground
         try:
             user32 = ctypes.windll.user32
-            hwnd = user32.FindWindowW(None, "ThorCPY Control Panel")
+            hwnd = user32.FindWindowW(None, "DualCPY Control Panel")
             if hwnd:
                 user32.ShowWindow(hwnd, 9)
                 user32.SetForegroundWindow(hwnd)
-                logger.debug("Main ThorCPY window brought to foreground")
+                logger.debug("Main DualCPY window brought to foreground")
             else:
-                logger.debug("Could not find ThorCPY Control Panel window")
+                logger.debug("Could not find DualCPY Control Panel window")
         except Exception as e:
             logger.warning(f"Error bringing main window to foreground: {e}")
 

@@ -1,4 +1,4 @@
-# ThorCPY - Dual-screen scrcpy docking and control UI for Windows
+# DualCPY - Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #
@@ -82,7 +82,7 @@ def show_loading_screen():
     ctk.set_default_color_theme("blue")
 
     splash = ctk.CTk()
-    splash.title("ThorCPY Loading...")
+    splash.title("DualCPY Loading...")
 
     window_width = 400
     window_height = 180
@@ -103,7 +103,7 @@ def show_loading_screen():
 
     ctk.CTkLabel(
         title_frame,
-        text="Thor",
+        text="Dual",
         font=make_font(45, "bold"),
         text_color=ACCENT_COLOUR,
     ).pack(side="left")
@@ -175,7 +175,7 @@ class CTkUI:
         ctk.set_default_color_theme("blue")
 
         self.window = ctk.CTk()
-        self.window.title("ThorCPY Control Panel")
+        self.window.title("DualCPY Control Panel")
         self.window.configure(fg_color=BG_COLOUR)
         self.window.minsize(360, 640)
 
@@ -262,7 +262,7 @@ class CTkUI:
 
         ctk.CTkLabel(
             title_row,
-            text="ThorCPY Control Panel",
+            text="DualCPY Control Panel",
             font=make_font(22, "bold"),
             text_color=TEXT_COLOUR,
         ).pack(side="left", padx=10)
