@@ -288,7 +288,7 @@ class CTkUI:
         self._build_ui()
 
         # For screenshots
-        self._dxcam = dxcam.create()
+        self._dxcam = dxcam.create(output_color="BGRA")
 
         # Making sure titlebar is dark
         try:
@@ -917,15 +917,13 @@ class CTkUI:
                 f"{left}, {top}, {right}, {bottom}"
             )
 
-            frame = self._dxcam.grab(
-                region=(left, top, right, bottom)
-            )
+            frame = self._dxcam.grab(region=(left, top, right, bottom))
 
             if frame is None:
                 logger.error("dxcam returned no frame")
                 return
 
-            img = Image.fromarray(frame)
+            img = Image.fromarray(frame[:, :, [2, 1, 0]])
             output = BytesIO()
             img.convert("RGB").save(output, "BMP")
             data = output.getvalue()[14:]
