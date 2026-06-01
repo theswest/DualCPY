@@ -31,7 +31,6 @@ from dataclasses import replace as dc_replace
 
 from src.presets import PresetStore
 from src.config import ConfigManager
-from ui_constants import resource_path
 from src.scrcpy_manager import ScrcpyManager
 from src.device_profile import BUILTIN_PROFILES
 from src.win32_darkmode import enable_dark_titlebar
@@ -42,6 +41,7 @@ from src.control_panel import show_loading_screen, CTkUI
 from src.device_profile_editor import DeviceProfileEditorDialog
 from src.win32_dock import Win32Dock, apply_docked_style, apply_undocked_style
 from src.device_detection import detect_device, resolve_adb, get_device_info, get_display_list
+from ui_constants import resource_path
 
 logger = logging.getLogger(__name__)
 
@@ -446,26 +446,61 @@ class Launcher:
             wc.hInstance = hinst
             wc.hbrBackground = ctypes.windll.gdi32.GetStockObject(BLACK_BRUSH)
 
-            try:
-                IMAGE_ICON = 1
-                LR_LOADFROMFILE = 0x00000010
-                LR_DEFAULTSIZE = 0x00000040
+            # Load the application icon.
+            # We build a list of candidate paths to try in order, because the
+            # working directory differs between PyCharm, terminal, and PyInstaller.
+            hicon = None
+            IMAGE_ICON      = 1
+            LR_LOADFROMFILE = 0x00000010
+            LR_DEFAULTSIZE  = 0x00000040
 
-                icon_path = resource_path("assets/icon.ico")
-                hicon = self.user32.LoadImageW(
-                    None,
-                    icon_path,
-                    IMAGE_ICON,
-                    0, 0,
-                    LR_LOADFROMFILE | LR_DEFAULTSIZE,
-                )
-                if hicon:
-                    wc.hIcon = hicon
-                    wc.hIconSm = hicon
-                else:
-                    logger.warning("Failed to load icon for container window (LoadImageW returned NULL)")
-            except Exception as e:
-                logger.warning(f"Could not load container window icon: {e}")
+            if getattr(sys, "frozen", False):
+                # Frozen: try the PyInstaller _MEIPASS bundle, then extract from exe
+                icon_candidates = [resource_path("assets/icon.ico")]
+            else:
+                # Dev: try cwd, the project root (one level above src/), and the
+                # directory containing this file — covers all PyCharm run configs
+                _this_dir    = os.path.dirname(os.path.abspath(__file__))
+                _project_root = os.path.dirname(_this_dir)
+                icon_candidates = [
+                    os.path.join(os.path.abspath("."), "assets", "icon.ico"),
+                    os.path.join(_project_root, "assets", "icon.ico"),
+                    os.path.join(_this_dir,     "assets", "icon.ico"),
+                ]
+
+            for _path in icon_candidates:
+                if not os.path.exists(_path):
+                    continue
+                try:
+                    hicon = self.user32.LoadImageW(
+                        None, _path, IMAGE_ICON, 0, 0,
+                        LR_LOADFROMFILE | LR_DEFAULTSIZE,
+                    )
+                    if hicon:
+                        logger.debug(f"Container icon loaded from: {_path}")
+                        break
+                except Exception as e:
+                    logger.debug(f"LoadImageW failed for {_path}: {e}")
+
+            # Final fallback for frozen builds: extract icon embedded in the exe
+            if not hicon and getattr(sys, "frozen", False):
+                try:
+                    large_icons = (wintypes.HICON * 1)()
+                    small_icons = (wintypes.HICON * 1)()
+                    n = ctypes.windll.shell32.ExtractIconExW(
+                        sys.executable, 0, large_icons, small_icons, 1,
+                    )
+                    if n > 0:
+                        hicon = large_icons[0]
+                        logger.debug("Container icon extracted from exe resources")
+                    else:
+                        logger.warning("ExtractIconExW returned 0 — container will have blank icon")
+                except Exception as e:
+                    logger.warning(f"ExtractIconExW failed: {e}")
+
+            if hicon:
+                wc.hIcon   = hicon
+                wc.hIconSm = hicon
 
             self.user32.RegisterClassExW(ctypes.byref(wc))
 
@@ -480,11 +515,15 @@ class Launcher:
                 ctypes.byref(rect), style, False, WS_EX_CONTROLPARENT
             )
 
+            # Build window title with device name if available
+            device_label = getattr(self, "device_model", None) or "Unknown Device"
+            window_title = f"DualCPY | {device_label}"
+
             # Create the container window
             hwnd = self.user32.CreateWindowExW(
                 WS_EX_CONTROLPARENT,
                 "DualCPYBridge",
-                f"DualCPY | {self.device_model or 'Unknown Device'}",
+                window_title,
                 style,
                 DEFAULT_CONTAINER_X,
                 DEFAULT_CONTAINER_Y,
