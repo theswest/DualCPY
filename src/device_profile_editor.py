@@ -320,19 +320,17 @@ class DeviceProfileEditorDialog:
                 wrap="none",
             )
             box.grid(row=r_box, column=0, columnspan=2, sticky="ew", pady=(2, 4))
-            # Scroll isolation: only scroll this textbox while the mouse is inside it.
-            def _bind_enter_leave(b=box):
-                inner = b._textbox
-                def _scroll(event):
-                    inner.yview_scroll(int(-1 * (event.delta / 120)), "units")
-                    return "break"
-                def _on_enter(e):
-                    inner.bind("<MouseWheel>", _scroll)
-                def _on_leave(e):
-                    inner.unbind("<MouseWheel>")
-                inner.bind("<Enter>", _on_enter)
-                inner.bind("<Leave>", _on_leave)
-            _bind_enter_leave()
+
+            def _autogrow(event, b=box):
+                # Grab the exact text and count the physical newlines
+                content = b.get("1.0", "end-1c")
+                lines = content.count('\n') + 1
+
+                # 14 pixels per line (tight fit for 11pt font), plus 10px for top/bottom borders
+                new_height = max(40, lines * 14 + 10)
+                b.configure(height=new_height)
+
+            box._textbox.bind("<KeyRelease>", _autogrow)
             setattr(self, attr, box)
 
         # Hide initially (form_scroll is not yet packed either)
@@ -438,8 +436,13 @@ class DeviceProfileEditorDialog:
         self._scale_var.set(str(profile.default_ui_scale))
         self._top_args_box.delete("1.0", "end")
         self._top_args_box.insert("1.0", "\n".join(getattr(profile, "extra_scrcpy_args_top", [])))
+        top_lines = int(self._top_args_box._textbox.index("end-1c").split(".")[0])
+        self._top_args_box.configure(height=max(40, top_lines * 20 + 10))
+
         self._bottom_args_box.delete("1.0", "end")
         self._bottom_args_box.insert("1.0", "\n".join(getattr(profile, "extra_scrcpy_args_bottom", [])))
+        bot_lines = int(self._bottom_args_box._textbox.index("end-1c").split(".")[0])
+        self._bottom_args_box.configure(height=max(40, bot_lines * 20 + 10))
         self._error_var.set("")
 
         self._top_info_var.set(

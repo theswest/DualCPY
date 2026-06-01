@@ -456,6 +456,7 @@ class ScrcpyManager:
             self.f_w1, self.f_h1, TOP_BITRATE_MINIMUM, TOP_BITRATE_SCALE,
             enable_audio=self.enable_audio_top,
         )
+        top_args = list(top_args) + ["--gamepad=uhid"]
         self._start_window(
             use_serial,
             profile.top_display_id,
@@ -488,6 +489,7 @@ class ScrcpyManager:
             self.f_w2, self.f_h2, BOTTOM_BITRATE_MINIMUM, BOTTOM_BITRATE_SCALE,
             enable_audio=False,
         )
+        bottom_args = list(bottom_args) + ["--gamepad=disabled"]
         self._start_window(
             use_serial,
             profile.bottom_display_id,

@@ -36,17 +36,18 @@ from src.ui_constants import (
 
 try:
     from src.win32_darkmode import enable_dark_titlebar
+
     _HAS_DARK_TITLEBAR = True
 except Exception:
     _HAS_DARK_TITLEBAR = False
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_UI_SCALE   = 0.5
-SLOW_DEVICE_DELAY  = 3
-FAST_DEVICE_DELAY  = 0
-DIALOG_WIDTH       = 480
-DIALOG_HEIGHT      = 620
+DEFAULT_UI_SCALE = 0.5
+SLOW_DEVICE_DELAY = 3
+FAST_DEVICE_DELAY = 0
+DIALOG_WIDTH = 480
+DIALOG_HEIGHT = 620
 
 
 class DeviceProfileDialog:
@@ -79,8 +80,8 @@ class DeviceProfileDialog:
         self._dialog.update_idletasks()
         sw = self._dialog.winfo_screenwidth()
         sh = self._dialog.winfo_screenheight()
-        x  = (sw - DIALOG_WIDTH)  // 2
-        y  = (sh - DIALOG_HEIGHT) // 2
+        x = (sw - DIALOG_WIDTH) // 2
+        y = (sh - DIALOG_HEIGHT) // 2
         self._dialog.geometry(f"{DIALOG_WIDTH}x{DIALOG_HEIGHT}+{x}+{y}")
 
         # Make modal
@@ -104,21 +105,21 @@ class DeviceProfileDialog:
         self._dialog.protocol("WM_DELETE_WINDOW", self._on_cancel)
 
         # State variables
-        self._device_name      = device_name
-        self._name_var         = tk.StringVar(value=device_name)
-        self._nickname_var     = tk.StringVar(value=device_name)
-        self._top_size_var     = tk.StringVar(value="")
-        self._bottom_size_var  = tk.StringVar(value="")
-        self._scale_var        = tk.StringVar(value=str(DEFAULT_UI_SCALE))
-        self._flipped_var      = tk.BooleanVar(value=False)
-        self._slow_var         = tk.BooleanVar(value=False)
+        self._device_name = device_name
+        self._name_var = tk.StringVar(value=device_name)
+        self._nickname_var = tk.StringVar(value=device_name)
+        self._top_size_var = tk.StringVar(value="")
+        self._bottom_size_var = tk.StringVar(value="")
+        self._scale_var = tk.StringVar(value=str(DEFAULT_UI_SCALE))
+        self._flipped_var = tk.BooleanVar(value=False)
+        self._slow_var = tk.BooleanVar(value=False)
 
         # Labels that update when flipped is toggled
-        self._top_id_var     = tk.StringVar()
-        self._top_res_var    = tk.StringVar()
-        self._bottom_id_var  = tk.StringVar()
+        self._top_id_var = tk.StringVar()
+        self._top_res_var = tk.StringVar()
+        self._bottom_id_var = tk.StringVar()
         self._bottom_res_var = tk.StringVar()
-        self._error_var      = tk.StringVar(value="")
+        self._error_var = tk.StringVar(value="")
 
         self._refresh_display_vars()
 
@@ -190,14 +191,15 @@ class DeviceProfileDialog:
             scrollbar_button_color=BORDER_COLOUR,
         )
         scroll.pack(fill="both", expand=True)
-        
+
         def _scroll(event):
             scroll._parent_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
             return "break"
+
         scroll._parent_canvas.bind("<Enter>",
-            lambda e: scroll._parent_canvas.bind("<MouseWheel>", _scroll))
+                                   lambda e: scroll._parent_canvas.bind("<MouseWheel>", _scroll))
         scroll._parent_canvas.bind("<Leave>",
-            lambda e: scroll._parent_canvas.unbind("<MouseWheel>"))
+                                   lambda e: scroll._parent_canvas.unbind("<MouseWheel>"))
         # Use scroll as the parent for all body widgets
         self._body = scroll
 
@@ -229,9 +231,9 @@ class DeviceProfileDialog:
         screens_frame.columnconfigure(0, weight=1)
         screens_frame.columnconfigure(1, weight=1)
 
-        self._top_panel    = self._screen_panel(screens_frame, "Top Screen",
-                                                self._top_id_var, self._top_res_var,
-                                                self._top_size_var, col=0)
+        self._top_panel = self._screen_panel(screens_frame, "Top Screen",
+                                             self._top_id_var, self._top_res_var,
+                                             self._top_size_var, col=0)
         self._bottom_panel = self._screen_panel(screens_frame, "Bottom Screen",
                                                 self._bottom_id_var, self._bottom_res_var,
                                                 self._bottom_size_var, col=1)
@@ -293,7 +295,7 @@ class DeviceProfileDialog:
         ))
 
         for label, defaults, attr in [
-            ("Top screen args",    top_defaults,    "_top_args_box"),
+            ("Top screen args", top_defaults, "_top_args_box"),
             ("Bottom screen args", bottom_defaults, "_bottom_args_box"),
         ]:
             ctk.CTkLabel(
@@ -312,15 +314,18 @@ class DeviceProfileDialog:
             )
             box.pack(fill="x", padx=20, pady=(2, 0))
             box.insert("1.0", defaults)
-            # Scroll isolation: textbox scrolls independently on hover
-            def _bind_box(b=box):
-                inner = b._textbox
-                def _s(event):
-                    inner.yview_scroll(int(-1 * (event.delta / 120)), "units")
-                    return "break"
-                inner.bind("<Enter>", lambda e: inner.bind("<MouseWheel>", _s))
-                inner.bind("<Leave>", lambda e: inner.unbind("<MouseWheel>"))
-            _bind_box()
+
+            def _autogrow(event, b=box):
+                # Grab the exact text and count the physical newlines
+                content = b.get("1.0", "end-1c")
+                lines = content.count('\n') + 1
+
+                # 14 pixels per line (tight fit for 11pt font), plus 10px for top/bottom borders
+                new_height = max(40, lines * 14 + 10)
+                b.configure(height=new_height)
+
+            box._textbox.bind("<KeyRelease>", _autogrow)
+            _autogrow(None, box)
             setattr(self, attr, box)
 
     @staticmethod
@@ -421,7 +426,7 @@ class DeviceProfileDialog:
             return
 
         # Parse per-screen args
-        top_args    = self._parse_args_box(self._top_args_box)
+        top_args = self._parse_args_box(self._top_args_box)
         bottom_args = self._parse_args_box(self._bottom_args_box)
 
         # Validate sizes
