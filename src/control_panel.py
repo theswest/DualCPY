@@ -82,6 +82,7 @@ def show_loading_screen():
     ctk.set_default_color_theme("blue")
 
     splash = ctk.CTk()
+    splash.iconbitmap()
     splash.title("DualCPY Loading...")
 
     window_width = 400
@@ -175,6 +176,7 @@ class CTkUI:
         ctk.set_default_color_theme("blue")
 
         self.window = ctk.CTk()
+        self.window.iconbitmap()
         self.window.title("DualCPY Control Panel")
         self.window.configure(fg_color=BG_COLOUR)
         self.window.minsize(360, 640)

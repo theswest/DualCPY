@@ -31,6 +31,7 @@ from dataclasses import replace as dc_replace
 
 from src.presets import PresetStore
 from src.config import ConfigManager
+from ui_constants import resource_path
 from src.scrcpy_manager import ScrcpyManager
 from src.device_profile import BUILTIN_PROFILES
 from src.win32_darkmode import enable_dark_titlebar
@@ -445,6 +446,27 @@ class Launcher:
             wc.hInstance = hinst
             wc.hbrBackground = ctypes.windll.gdi32.GetStockObject(BLACK_BRUSH)
 
+            try:
+                IMAGE_ICON = 1
+                LR_LOADFROMFILE = 0x00000010
+                LR_DEFAULTSIZE = 0x00000040
+
+                icon_path = resource_path("assets/icon.ico")
+                hicon = self.user32.LoadImageW(
+                    None,
+                    icon_path,
+                    IMAGE_ICON,
+                    0, 0,
+                    LR_LOADFROMFILE | LR_DEFAULTSIZE,
+                )
+                if hicon:
+                    wc.hIcon = hicon
+                    wc.hIconSm = hicon
+                else:
+                    logger.warning("Failed to load icon for container window (LoadImageW returned NULL)")
+            except Exception as e:
+                logger.warning(f"Could not load container window icon: {e}")
+
             self.user32.RegisterClassExW(ctypes.byref(wc))
 
             # Calculate container size to fit both stacked windows
@@ -462,7 +484,7 @@ class Launcher:
             hwnd = self.user32.CreateWindowExW(
                 WS_EX_CONTROLPARENT,
                 "DualCPYBridge",
-                "DualCPY",
+                f"DualCPY | {self.device_model or 'Unknown Device'}",
                 style,
                 DEFAULT_CONTAINER_X,
                 DEFAULT_CONTAINER_Y,
