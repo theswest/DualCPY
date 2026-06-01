@@ -38,3 +38,6 @@ build/
 *.tmp
 *.bak
 ~*
+
+# Misc
+notes.txt

@@ -1,4 +1,4 @@
-# ThorCPY - Dual-screen scrcpy docking and control UI for Windows
+# DualCPY - Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #
@@ -17,8 +17,9 @@
 
 # src/win32_dock.py
 
-import ctypes
+import sys
 import time
+import ctypes
 import logging
 from ctypes import wintypes
 
@@ -87,18 +88,13 @@ class Win32Dock:
         self.hwnd_bottom = None
         self._last_sync = 0
         self._min_sync_interval = MIN_SYNC_INTERVAL
+        self._last_top_geom = None
+        self._last_bottom_geom = None
         logger.debug("Win32Dock initialized with null window handles")
 
     def sync(self, tx, ty, bx, by, w1, h1, w2, h2, is_docked=True):
         """
-        Moves and resizes both embedded windows
-
-        Parameters:
-            tx, ty: top window position relative to container
-            bx, by: bottom window position relative to container
-            w1, h1: top window width/height
-            w2, h2: bottom window width/height
-            is_docked: whether windows are docked inside container
+        Moves and resizes both embedded windows with accurate border awareness.
         """
 
         # Throttle rapid updates
@@ -108,40 +104,35 @@ class Win32Dock:
         self._last_sync = now
 
         if not (self.hwnd_top and self.hwnd_bottom):
-            # Don't spam logs - only log first time
             if not hasattr(self, "_sync_warning_logged"):
                 logger.debug("Sync skipped: window handles not available yet")
                 self._sync_warning_logged = True
             return
 
         try:
-            # Flags for SetWindowPos: don't change z-order, don't activate, don't copy bits
-            flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS
-
             if is_docked:
-                # Child windows are drawn relative to the container
-                logger.debug(
-                    f"Syncing docked windows - Top: ({tx}, {ty}, {w1}x{h1}), Bottom: ({bx}, {by}, {w2}x{h2})"
-                )
+                flags = SWP_NOZORDER | SWP_NOACTIVATE
+                top_geom = (int(tx), int(ty), int(w1), int(h1))
+                bottom_geom = (int(bx), int(by), int(w2), int(h2))
 
-                result_top = user32.SetWindowPos(
-                    self.hwnd_top, 0, int(tx), int(ty), int(w1), int(h1), flags
-                )
-                if not result_top:
-                    logger.warning(
-                        f"SetWindowPos failed for top window (hwnd={self.hwnd_top})"
-                    )
+                if top_geom != self._last_top_geom:
+                    logger.debug(f"Syncing docked top: {top_geom}")
+                    if not user32.SetWindowPos(self.hwnd_top, 0, *top_geom, flags):
+                        logger.warning(
+                            f"SetWindowPos failed for top window (hwnd={self.hwnd_top})"
+                        )
+                    self._last_top_geom = top_geom
 
-                result_bottom = user32.SetWindowPos(
-                    self.hwnd_bottom, 0, int(bx), int(by), int(w2), int(h2), flags
-                )
-                if not result_bottom:
-                    logger.warning(
-                        f"SetWindowPos failed for bottom window (hwnd={self.hwnd_bottom})"
-                    )
+                if bottom_geom != self._last_bottom_geom:
+                    logger.debug(f"Syncing docked bottom: {bottom_geom}")
+                    if not user32.SetWindowPos(self.hwnd_bottom, 0, *bottom_geom, flags):
+                        logger.warning(
+                            f"SetWindowPos failed for bottom window (hwnd={self.hwnd_bottom})"
+                        )
+                    self._last_bottom_geom = bottom_geom
 
             else:
-                # For undocked mode, offset is decided by container's screen position
+                # Account for Title Bars and Borders for undocked mode
                 if self.hwnd_container:
                     rect = wintypes.RECT()
                     if not user32.GetWindowRect(
@@ -152,33 +143,57 @@ class Win32Dock:
                         )
                         return
 
-                    screen_tx = rect.left + int(tx)
-                    screen_ty = rect.top + int(ty)
-                    screen_bx = rect.left + int(bx)
-                    screen_by = rect.top + int(by)
+                    flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
 
-                    logger.debug(
-                        f"Syncing undocked windows - Top: ({screen_tx}, {screen_ty}), "
-                        f"Bottom: ({screen_bx}, {screen_by})"
-                    )
+                    # Adjusting the top window
+                    style_top = user32.GetWindowLongW(self.hwnd_top, GWL_STYLE)
+                    ex_style_top = user32.GetWindowLongW(self.hwnd_top, GWL_EXSTYLE)
+                    rect_top = wintypes.RECT(0, 0, int(w1), int(h1))
+                    user32.AdjustWindowRectEx(ctypes.byref(rect_top), style_top, False, ex_style_top)
 
-                    user32.SetWindowPos(
-                        self.hwnd_top, 0, screen_tx, screen_ty, int(w1), int(h1), flags
-                    )
-                    user32.SetWindowPos(
-                        self.hwnd_bottom,
-                        0,
-                        screen_bx,
-                        screen_by,
-                        int(w2),
-                        int(h2),
-                        flags,
-                    )
+                    w1_adj = rect_top.right - rect_top.left
+                    h1_adj = rect_top.bottom - rect_top.top
+                    # Shift origin by the border padding so the client content lines up perfectly
+                    x1_adj = rect.left + int(tx) + rect_top.left
+                    y1_adj = rect.top + int(ty) + rect_top.top
+                    top_geom = (x1_adj, y1_adj, w1_adj, h1_adj)
+
+                    # Adjusting the bottom window
+                    style_bot = user32.GetWindowLongW(self.hwnd_bottom, GWL_STYLE)
+                    ex_style_bot = user32.GetWindowLongW(self.hwnd_bottom, GWL_EXSTYLE)
+                    rect_bot = wintypes.RECT(0, 0, int(w2), int(h2))
+                    user32.AdjustWindowRectEx(ctypes.byref(rect_bot), style_bot, False, ex_style_bot)
+
+                    w2_adj = rect_bot.right - rect_bot.left
+                    h2_adj = rect_bot.bottom - rect_bot.top
+                    x2_adj = rect.left + int(bx) + rect_bot.left
+                    y2_adj = rect.top + int(by) + rect_bot.top
+                    bottom_geom = (x2_adj, y2_adj, w2_adj, h2_adj)
+
+                    # Apply adjusted geometries
+                    if top_geom != self._last_top_geom:
+                        logger.debug(f"Syncing undocked top: {top_geom}")
+                        user32.SetWindowPos(self.hwnd_top, 0, *top_geom, flags)
+                        self._last_top_geom = top_geom
+
+                    if bottom_geom != self._last_bottom_geom:
+                        logger.debug(f"Syncing undocked bottom: {bottom_geom}")
+                        user32.SetWindowPos(self.hwnd_bottom, 0, *bottom_geom, flags)
+                        self._last_bottom_geom = bottom_geom
                 else:
                     logger.warning("Cannot sync undocked windows: no container handle")
 
         except Exception as WindowSyncError:
             logger.error(f"Error during window sync: {WindowSyncError}", exc_info=True)
+
+    def invalidate_geom_cache(self):
+        """
+        Force the next sync() to re-issue SetWindowPos for both windows.
+        Call after dock/undock or any operation that changes the
+        coordinate space the windows are positioned in.
+        """
+        self._last_top_geom = None
+        self._last_bottom_geom = None
 
     def force_focus(self, hwnd):
         """Forces keyboard focus by linking thread input queues."""
@@ -283,9 +298,6 @@ def apply_docked_style(hwnd):
 def apply_undocked_style(hwnd):
     """
     Restore a child window back to a normal resizable desktop window.
-
-    Args:
-        hwnd: Window handle to restore to normal style
     """
     if not hwnd:
         logger.warning("apply_undocked_style called with null hwnd")
@@ -294,44 +306,44 @@ def apply_undocked_style(hwnd):
     try:
         logger.info(f"Applying undocked style to window {hwnd}")
 
-        # Get current style
+        # Get current window dimensions (which equals the target content size)
+        rect = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        orig_w = rect.right - rect.left
+        orig_h = rect.bottom - rect.top
+
         style = user32.GetWindowLongW(hwnd, GWL_STYLE)
-        if not style:
-            logger.error(f"GetWindowLongW failed for hwnd {hwnd}")
-            return
+        ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
 
-        logger.debug(f"Current window style: 0x{style:08x}")
+        # Modify styles and detatch from parent
+        style &= ~WS_CHILD
+        style |= WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
 
-        # Remove child flag and all decorations
-        style &= ~(WS_CHILD | WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_BORDER)
+        user32.SetWindowLongW(hwnd, GWL_STYLE, style)
 
-        # Keep visible as a top-level window with clipping
-        style |= WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
+        user32.SetParent(hwnd, None)
 
-        logger.debug(f"New window style: 0x{style:08x}")
+        # Calculate the required outer window size to keep the original content size
+        needed_rect = wintypes.RECT(0, 0, orig_w, orig_h)
+        user32.AdjustWindowRectEx(ctypes.byref(needed_rect), style, False, ex_style)
+        target_w = needed_rect.right - needed_rect.left
+        target_h = needed_rect.bottom - needed_rect.top
 
-        # Apply new style
-        result = user32.SetWindowLongW(hwnd, GWL_STYLE, style)
-        if not result:
-            logger.warning(f"SetWindowLongW may have failed for hwnd {hwnd}")
-        else:
-            logger.debug("Window style applied successfully")
+        # We temporarily size it 1 pixel off, then immediately drop it to target size to make SDL realise the content size
+        user32.SetWindowPos(
+            hwnd, 0, rect.left, rect.top, target_w + 1, target_h + 1,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
+        )
 
-        # Detach from container
-        logger.debug(f"Detaching window {hwnd} from parent")
-        result = user32.SetParent(hwnd, None)
-        if not result:
-            logger.warning(f"SetParent may have failed for hwnd {hwnd}")
+        # Snap it back to the correct size
+        user32.SetWindowPos(
+            hwnd, 0, rect.left, rect.top, target_w, target_h,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_NOCOPYBITS
+        )
 
-        # Force windows to redraw borders/title bar
-        logger.debug(f"Forcing frame change for hwnd {hwnd}")
-        result = user32.SetWindowPos(
-            hwnd, 0, 0, 0, 0, 0,
-            SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE)
-        if not result:
-            logger.warning(f"SetWindowPos frame change may have failed for hwnd {hwnd}")
-        else:
-            logger.info(f"Undocked style applied successfully to hwnd {hwnd}")
+        # Redraw it
+        user32.InvalidateRect(hwnd, None, True)
+        user32.UpdateWindow(hwnd)
 
     except Exception as UndockedStylingError:
         logger.error(f"Error applying undocked style to hwnd {hwnd}: {UndockedStylingError}", exc_info=True)
@@ -381,8 +393,7 @@ def set_foreground_with_attach(hwnd):
         except Exception as e:
             logger.debug(f"SetForegroundWindow without attachment failed: {e}")
 
-        # WINDOWS 10 CHECK - Be extra cautious
-        import sys
+        # Windows 10 Check
         is_win10 = sys.getwindowsversion().build < 22000
 
         if is_win10:

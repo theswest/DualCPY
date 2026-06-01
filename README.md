@@ -1,151 +1,177 @@
 <p align="center">
-  <img src="assets/icon.png" alt="ThorCPY Logo" width="250">
+  <img src="assets/icon.png" alt="DualCPY logo" height="96" align="middle">
+  &nbsp;&nbsp;
+  <img src="assets/screenshots/dualcpy_wordmark.svg" alt="DualCPY" height="68" align="middle">
 </p>
 
-# ThorCPY
+> [!NOTE]
+> Previously known as **ThorCPY**. As of v1.0.0, the project supports all dual-screen handhelds - not just the AYN Thor - and has been renamed to **DualCPY**.
 
-ThorCPY *(Pronounced "Thor Copy")* is a Windows-based multi-window Scrcpy launcher, designed specifically for the AYN Thor.
-It features a layout editor, window docking, screenshots, and window moving.
+DualCPY *(pronounced "Dual Copy")* is a Windows-based multi-window scrcpy launcher, designed specifically for dual-screen Android handhelds.
+It features a layout editor, window docking, screenshots, file transfer, device profiles, and real-time window positioning.
 
-It launches two scrcpy windows (one for each display), and embeds them into a native windows container.
-Designed for screensharing, recording or livestreaming.
+It launches two scrcpy windows (one for each display) and embeds them into a native Windows container - ideal for screensharing, recording, or livestreaming.
 
-**ThorCPY is primarily designed for Windows 11. It will work on Windows 10, however bugs may occur!**
+**DualCPY is primarily designed for Windows 11. It will work on Windows 10, however bugs may occur!**
 
-**For Linux users, please use the Linux Port: https://github.com/DrSkyfaR/ThorCPY-Linux**
+**For Linux users, please use the Linux port: https://github.com/DrSkyfaR/ThorCPY-Linux**
 
-Please report any issues at https://github.com/theswest/ThorCPY/issues
+Please report any issues at https://github.com/theswest/DualCPY/issues
 
-| Main UI                             | ThorCPY Screenshot                             |
-|-------------------------------------|------------------------------------------------|
-| ![](assets/screenshots/main_ui.png) | ![](assets/screenshots/ThorCPY-Screenshot.png) |
+<h2 align="center">Screenshots</h2>
 
+<table align="center">
+  <tr>
+    <td align="center"><b>Control Panel</b></td>
+    <td align="center"><b>Dual-Screen Capture</b></td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/main_ui.png" alt="Control Panel" width="420"></td>
+    <td><img src="assets/screenshots/dualcpy-screenshot.png" alt="Dual-screen capture" width="420"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>File Transfer</b></td>
+    <td align="center"><b>Device Profiles</b></td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/file_transfer.png" alt="File transfer" width="420"></td>
+    <td><img src="assets/screenshots/device_profiles.png" alt="Device profiles" width="420"></td>
+  </tr>
+</table>
 
-## Features:
+## What's New in 1.0.0
 
-- Custom dual-screen support built for the AYN Thor, allowing both wired and wireless connections
-- Dock screenshares in a window, or separate them for specific screen captures
-- Layout presets allow you to display the screens precisely the way you want
-- Screenshot capture takes a beautiful screenshot of both screens, including transparency where the screens aren't!
-- Real-time positioning allows you to move the screens around into whatever position you want
+- Rebranded from ThorCPY to DualCPY, with a brand-new logo and splash screen
+- Complete UI redesign in CustomTkinter, with a cleaner, more modern design language
+- Multi-device support with automatic device detection and built-in profiles for many handhelds
+- Profile editor for custom devices, screen sizes, internal monitors, and per-profile scrcpy commands
+- File Transfer window for two-way file management over ADB (@DrSkyfaR & @theswest)
+- Gamepad passthrough to the device
+- FPS selector and Restart button in the control panel (@tommywaaf)
+- Undocked windows now have title bars for easy resizing and moving (@tommywaaf)
+- Updated bundled scrcpy to v4.0, plus major backend performance and latency improvements
 
-Technical Features:
-- Comprehensive logging
-- Automatic device detection via ADB
-- Thread-safe window managing
-- Graceful error handling and recovery
-- PyInstaller support for standalone executables
+See the full [CHANGELOG](CHANGELOG.md) for details.
 
-## Installation:
+## Features
 
-> **To use ThorCPY, you must have ***USB Debugging*** enabled.**
-> **To install ***USB Debugging***:**
-> 1) **On the device, go to Settings > About device.**
-> 2) **Tap the Build number seven times to make Settings > Developer options available.**
-> 3) **Then, enable the USB Debugging option from the Developer options.**
-> You must then connect your thor via USB to your computer or just launch ThorCPY to start the wireless connection dialogue
+- Multi-device support with built-in profiles for many dual-screen handhelds (AYN Thor, RG DS, Pocket DS, Retroid/AYN Odin + RDS, Retroid Pocket + RDS, and more), plus custom user-defined profiles
+- Automatic device detection over ADB, with a device selector on launch and smart selection of the connected device
+- "Last used profile" is remembered per-device and auto-booted on launch
+- Both wired (USB) and wireless connection
+- Dock both screens into one window, or undock them into independent, resizable, title-barred windows for individual capture (e.g. streaming layouts)
+- Layout presets to position the screens precisely how you want
+- Screenshot capture grabs both screens together, in the layout you've got them in
+- File transfer to and from the device over ADB, with image previews, file metadata, and quick-nav shortcuts on both Windows and device sides
+- Profile editor for custom screen sizes, internal-monitor layouts, and per-profile scrcpy launch commands
+- Gamepad passthrough to the device (`--gamepad=uhid` on the top screen)
+- FPS selector and restart controls in the panel
+- Real-time positioning to move the screens into any arrangement
 
+## Installation
 
-### Option 1: Standalone Executable    
- - Prebuilt executables can be found in [Releases](https://github.com/theswest/ThorCPY/releases)
+> **To use DualCPY, you must have *USB Debugging* enabled.**
+> **To enable *USB Debugging*:**
+> 1. On the device, go to **Settings > About device**.
+> 2. Tap the **Build number** seven times to unlock **Settings > Developer options**.
+> 3. Enable the **USB Debugging** option from Developer options.
+>
+> Then connect your device via USB, or just launch DualCPY to start the wireless connection dialog.
 
-### Option 2: Run from Source:
-> Note: Pygame does not have a wheel for Python 3.14 yet. Please use a lower version!
-1) Clone the repository:
-	- `git clone https://github.com/theswest/ThorCPY.git`
-	- `cd ThorCPY`
-2) Install Python dependencies:
-	- `pip install -r requirements.txt`
-3) Run ThorCPY
-	- `python main.py`
+### Option 1: Standalone Executable
+- Prebuilt executables can be found in [Releases](https://github.com/theswest/DualCPY/releases).
 
-### Option 3: Build from Source:
- 1) Install PyInstaller:
-	- `pip install pyinstaller`
-2) Run the build script:
-	- `python build.py`
-3) Find your executable:
-	- Located in `dist/ThorCPY.exe`
-	- Ensure that the executable must be placed in a folder with `bin/`, `config/` and `logs/`
+### Option 2: Run from Source
+> Note: Pygame does not yet have a wheel for Python 3.14 - please use a lower version!
+1. Clone the repository:
+   - `git clone https://github.com/theswest/DualCPY.git`
+   - `cd DualCPY`
+2. Install Python dependencies:
+   - `pip install -r requirements.txt`
+3. Run DualCPY:
+   - `python main.py`
 
-**Note:** scrcpy and ADB binaries are included in the `bin/` folder for your convenience.
+### Option 3: Build from Source
+1. Install PyInstaller:
+   - `pip install pyinstaller`
+2. Run the build script:
+   - `python build.py`
+3. Find your build:
+   - DualCPY is bundled in `dist/DualCPY/`.
 
-## Bundled Software:
+**Note:** scrcpy and ADB binaries are bundled in DualCPY.
 
-ThorCPY includes the following third-party software:
-- **scrcpy v3.3.4** by Genymobile/Romain Vimont
-- Licensed under Apache License 2.0
-- See `bin/LICENSE_scrcpy.txt` for full license text
+## Bundled Software
+
+DualCPY includes the following third-party software:
+- **scrcpy v4.0** by Genymobile / Romain Vimont
+- Licensed under the Apache License 2.0
 - Source: https://github.com/Genymobile/scrcpy
 
 This bundled software is unmodified and used as-is for the convenience of end users.
 
-To manually create the `bin` folder, simply extract the [latest release of scrcpy](https://github.com/Genymobile/scrcpy/releases/tag/v3.3.4) to `bin/`
+## Requirements
 
-
-## Requirements:
-
-### System:
-- OS: Windows 11 (Theoretically also Windows 10 (1809+))
+### System
+- OS: Windows 11 (theoretically also Windows 10, 1809+)
 - Python 3.8 or higher when running from source
-- **Device**: AYN Thor with USB debugging enabled
+- **Device:** a dual-screen Android handheld with USB debugging enabled
 
-### Included Dependencies:
-- ADB (Android Debug Bridge) - in `bin/` folder
-- scrcpy binary - in `bin/` folder
+### Python Dependencies
+- See [requirements.txt](https://github.com/theswest/DualCPY/blob/master/requirements.txt) for the full list. Install with:
+  - `pip install -r requirements.txt`
 
-### Python Dependencies:
--  See [requirements.txt](https://github.com/theswest/ThorCPY/blob/master/requirements.txt) for the full list. Install with:
-	- `pip install -r requirements.txt`
+## Usage
 
-## Usage:
-> **To use ThorCPY, you must have ***USB Debugging*** enabled.**
-> **To install ***USB Debugging***:**
-> 1) **On the device, go to Settings > About device.**
-> 2) **Tap the Build number seven times to make Settings > Developer options available.**
-> 3) **Then, enable the USB Debugging option from the Developer options.**
-> You must then connect your thor via USB to your computer or just launch ThorCPY to start the wireless connection dialogue
-
-### Connection:
-- To connect to ThorCPY, you can either connect via USB (Charging, offline and better connection) or Wireless (No tethers)
+### Connection
+- You can connect via USB (charging, offline, more stable) or wirelessly (no tethers).
 - To connect via USB:
-  - Ensure you have followed the steps above to enable USB Debugging. 
-  - Simply plug in your Thor and launch ThorCPY!
+  - Ensure USB Debugging is enabled (see above).
+  - Plug in your device and launch DualCPY!
 - To connect wirelessly:
-  - Open ThorCPY without your device being connected via USB
-  - Open the Wireless connection menu
-  - In your Thor's developer settings, enable "Wireless USB Debugging" and press on the text to upen the submenu
-  - Press "Pair with code" and input the IP address, Port and Connection code to pair your device and the computer.
-  - Once the device has been successfuly paired, put the IP and port from the field "IP address & Port" in the settings in the "Connect by IP" settings.
-  - Close the menu - ThorCPY will automatically restart!
+  - Open DualCPY without your device connected via USB.
+  - Open the wireless connection menu.
+  - In your device's developer settings, enable Wireless debugging and tap the text to open its submenu.
+  - Tap Pair device with pairing code and enter the IP address, port, and pairing code shown.
+  - Once paired, copy the IP and port from the IP address & Port field into the Connect by IP field in DualCPY.
+  - Close the menu - DualCPY will automatically restart and connect!
 
-### Main Controls:
-- The ThorCPY control panel appears on the right hand side of your screen with the following controls:
-- Global Scale:
-    - Adjust the scale of the scrcpy outputs (requires restart)
+### Device Selection
+- On launch, DualCPY detects connected devices over ADB and shows a device selector.
+- It smart-selects the connected device and remembers the last used profile per device.
+- Don't see your device? Use the profile editor to add a custom profile (screen sizes, internal-monitor layout, and per-profile scrcpy launch command).
+
+### Main Controls
+The DualCPY control panel appears on the right-hand side of your screen with the following controls:
+- Global Scale: adjust the scale of the scrcpy outputs (requires restart)
+- FPS: select the target framerate
+- Restart: restart the mirroring session
 - Layout Adjustment:
-	- Top X/Top Y:
-		- Adjust position of top screen
-	- BOTTOM X/BOTTOM Y
-		- Adjust position of bottom screen
+  - Top X / Top Y: position the top screen
+  - Bottom X / Bottom Y: position the bottom screen
 - Window Controls:
-	- Undock windows: Separate windows into independent floating windows (for individual window capture e.g. streaming layout)
-	 - Dock windows: Bring undocked windows back into one, unified window
-	 - Screenshot: Capture the entire docked view to clipboard (only works when docked)
-       - Note: Screenshot background transparency is only available on Windows 11  
+  - Undock windows: separate into independent, title-barred floating windows (for individual capture, e.g. streaming)
+  - Dock windows: bring undocked windows back into one unified window
+  - Screenshot: capture the entire docked view to the clipboard (only works when docked)
+- File Transfer: open the file browser to move files between your PC and device over ADB
 - Preset Management:
-	- Adjust your layout as desired
-	 - Enter a name into the preset field
-	 - Click "SAVE" to save the layout as a preset
-	 - Click "LOAD" next to a previously saved preset to apply it
-	 - Click "DEL" next to a previously saved preset to remove it
+  - Adjust your layout as desired
+  - Enter a name in the preset field and click SAVE
+  - Click LOAD next to a saved preset to apply it
+  - Click DEL next to a saved preset to remove it
 
+### File Transfer
+- Transfer files in both directions (Windows -> device and device -> Windows) over ADB.
+- Delete, rename, and create folders on the device.
+- Windows quick-nav: Home, Desktop, Downloads, Documents, Pictures
+- Device quick-nav: Internal, Download, DCIM, Pictures, Music, Documents
+- Automatic SD card detection with quick-nav pills
+- Inline image previews with file metadata
 
-## Configuration:
+## Configuration
 
-### Layouts/Presets:
-- Presets are stored in config/layout.json
-- You can manually edit this file if needed:
+### Layouts / Presets
+- Presets are stored in `config/layout.json`. You can edit this file manually if needed:
 ```json title:layout.json
 {
     "Default": {
@@ -153,111 +179,126 @@ To manually create the `bin` folder, simply extract the [latest release of scrcp
         "ty": 0,
         "bx": 251,
         "by": 648,
-		"global_scale": 0.6
+        "global_scale": 0.6
     },
     "Streaming": {
         "tx": 100,
         "ty": 50,
         "bx": 300,
         "by": 700,
-		"global_scale": 0.3
+        "global_scale": 0.3
     }
 }
 ```
 
-### Config:
-- More general config settings are saved in config/config.json
-- You can manually edit this file if needed:
+### Config
+- General settings are stored in `config/config.json`. You can edit this file manually if needed:
 ```json title:config.json
 {
-    "global_scale": 0.6,
     "tx": 0,
     "ty": 0,
-    "bx": 251,
-    "by": 648
+    "bx": 250,
+    "by": 648,
+    "global_scale": 0.6,
+    "device_profiles": {
+        "78ab8b8f": "ayn_thor"
+    },
+    "last_profile": "AYN Thor",
+    "device_scales": {
+        "78ab8b8f": 0.6
+    }
 }
 ```
 
-### Scaling:
-- The default scaling is set to 0.6 (60% of original resolution).
-- An easier way to change this will be added in the future, for now you can modify `global_scale` in `launcher.py`.
-- `self.global_scale = 0.6  # Change to desired scale (0.3 to 1.0 recommended)`
+### Custom Profiles
+- Custom profiles are stored in `config/custom_profiles.json`. You can edit this file manually if needed:
 
-### Logging:
-- Logs are automatically saved to logs/, with daily rotation. Log files are named:
-	 - `thorcpy_YYYYMMDD.log` - Main application log
-	 - `thorcpy_top_YYYYMMDD_HHMMSS.log` - Top window scrcpy output
-	 - `thorcpy_bottom_YYYYMMDD_HHMMSS.log` - Bottom window scrcpy output
-- To adjust log verbosity, modify the logging level in `main.py`:
+### Logging
+- Logs are saved to `logs/` with daily rotation:
+  - `dualcpy_YYYYMMDD.log` - main application log
+  - `scrcpy_top_YYYYMMDD_HHMMSS.log` - top window scrcpy output
+  - `scrcpy_bottom_YYYYMMDD_HHMMSS.log` - bottom window scrcpy output
+- To adjust verbosity, change the logging level in `main.py`:
 ```python title=main.py
 logging.basicConfig(
-	level=logging.INFO, # Change to DEBUG for detailed logs
-	...
+    level=logging.INFO, # Change to DEBUG for detailed logs
+    ...
 )
 ```
 
-## Troubleshooting:
+## Troubleshooting
 
-### Layout issues:
-- Load the preset at 0.6 global scale and save it.
-- Delete `config/layout.json` and `config/config.json` so they are reloaded
+### Layout issues
+- Load a preset at 0.6 global scale and save it.
+- Delete `config/layout.json` and `config/config.json` so they are regenerated.
 
-### Device Not Found:
-- Ensure USB debugging is enabled on your Thor - Try a different USB cable (Ensure data cable, not charging-only)
+### Device not found
+- Ensure USB debugging is enabled on your device - try a different USB cable (a data cable, not charging-only).
 - Revoke USB debugging authorizations and reconnect:
-	- Settings -> System -> Developer Options -> Revoke USB debugging authorizations
+  - Settings → System → Developer Options → Revoke USB debugging authorizations
 - Check if ADB can see your device: `bin/adb.exe devices`
-- Restart ADB server: `bin/adb.exe kill-server` then `bin/adb.exe start-server`
+- Restart the ADB server: `bin/adb.exe kill-server` then `bin/adb.exe start-server`
 
-### Scrcpy won't start:
-- Ensure that scrcpy.exe is in the bin/ folder
-- Check logs for detailed error messages
+### scrcpy won't start
+- Ensure `scrcpy.exe` is in the `bin/` folder.
+- Check the logs for detailed error messages.
 - Try running scrcpy manually: `bin/scrcpy.exe -s YOUR_DEVICE_SERIAL`
-- Update to the latest scrcpy version
-- Ensure your device has the required display IDs (0 and 4)
+- Update to the latest scrcpy version.
+- Ensure your device exposes the required display IDs for your profile.
 
-### Windows Won't Dock:    
- - Wait a few seconds for windows to initialize
- - Try toggling dock/undock multiple times
- - Restart the application
- - Check logs for any errors
+### Windows won't dock
+- Wait a few seconds for windows to initialize.
+- Try toggling dock/undock a few times.
+- Restart the application.
+- Check the logs for errors.
 
-### Performance Issues:    
- - Reduce the global scale
- - Close other resource-intensive applications
- - Use a USB 3 port
- - Lower the max FPS in launcher.py (change --max-fps)
- - Reduce the video bitrate in scrcpy_manager.py
+### Graphical Errors
+- Try toggling dock/undock a few times.
+- Restart the application.
+- Try a wireless connection to rule out USB issues
+- Check the logs for errors.
 
-### Missing DLL or Import Errors
- - Reinstall dependencies: `pip install -r requirements.txt --force-reinstall`
- - Ensure Python 3.8+ is installed
- - Install Visual C++ Redistributables
+### Performance issues
+- Reduce the global scale.
+- Lower the FPS in the control panel.
+- Close other resource-intensive applications.
+- Use a USB 3 port.
+- Try increasing the configurable screen-launch delay for lower-powered devices.
 
+### Gamepad not detected
+- You may need to reconnect your controller while DualCPY is running - this is an Android limitation with `--gamepad=uhid`.
+
+### Missing DLL or import errors
+- Reinstall dependencies: `pip install -r requirements.txt --force-reinstall`
+- Ensure Python 3.8+ is installed.
+- Install the Visual C++ Redistributables.
+
+### Known Issues
+- Restarting does not work when running from source.
 
 ## Licenses
 
- - This project is licensed under the **GNU General Public License v3.0** - see the LICENSE file for details, [here](https://github.com/theswest/ThorCPY/blob/master/bin/LICENSE).
- - You are free to modify and redistribute it under the same terms.
- - [Scrcpy](https://github.com/Genymobile/scrcpy) uses Apache License 2.0, which the LICENSE file can be found [here](https://github.com/theswest/ThorCPY/blob/master/bin/LICENSE_scrcpy.txt).
- - The font used in-app is [Cal Sans](https://github.com/calcom/font), which uses the SIL Open Font License 1.1. The LICENSE file can be found [here](https://github.com/theswest/ThorCPY/blob/master/assets/fonts/OFL.txt)
+- This project is licensed under the GNU General Public License v3.0 - see the LICENSE file [here](https://github.com/theswest/DualCPY/blob/master/bin/LICENSE). You are free to modify and redistribute it under the same terms.
+- [scrcpy](https://github.com/Genymobile/scrcpy) uses the Apache License 2.0, found [here](https://github.com/theswest/DualCPY/blob/master/bin/LICENSE_scrcpy.txt).
+- The in-app font is [Cal Sans](https://github.com/calcom/font), under the SIL Open Font License 1.1, found [here](https://github.com/theswest/DualCPY/blob/master/assets/fonts/OFL.txt).
 
+## Contributing
 
-## Contributing:
-
-Contributions are more than welcome! This started as a personal project but it was released after several requests.
-Feel free to submit a pull request. For major changes, please open an issue first to discuss what you would like to change.
+Contributions are more than welcome! This started as a personal project but was released after several requests.
+Feel free to submit a pull request. For major changes, please open an issue first to discuss what you'd like to change.
 This was originally built as a quick personal tool, so refactoring PRs are especially welcome!
 
+## Supporting
 
-## Supporting:
 Buy me a coffee: https://ko-fi.com/theswest
 
-## Acknowledgements:
+## Acknowledgements
 
-- **[eldermonkey](https://github.com/eldermonkey)** - For making the incredible logo
-- **[scrcpy](https://github.com/Genymobile/scrcpy)** by Romain Vimont - The backend that makes this all possible
-- **[Cal Sans](https://github.com/calcom/font)** by Cal.com Inc. - UI typography (SIL Open Font License 1.1)
-- **[Pygame](https://www.pygame.org/)** - UI rendering and event handling
+- **[DrSkyfaR](https://github.com/DrSkyfaR)** - File Transfer logic and the Linux port
+- **[tommywaaf](https://github.com/tommywaaf)** - backend performance work, FPS/restart controls, title-barred undocked windows, and more
+- **[eldermonkey](https://github.com/eldermonkey)** - for the legacy logo
+- **[scrcpy](https://github.com/Genymobile/scrcpy)** by Romain Vimont - the backend
+- **[Cal Sans](https://github.com/calcom/font)** by Cal.com Inc. UI typography (SIL Open Font License 1.1)
+- **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)** - modern UI toolkit
 - **Microsoft** - Windows API documentation
-- All contributors and testers!
+- All other contributors and testers, especially dd, splain, and everyone else who helped!

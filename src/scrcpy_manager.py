@@ -1,4 +1,4 @@
-# ThorCPY – Dual-screen scrcpy docking and control UI for Windows
+# DualCPY - Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #
@@ -18,30 +18,22 @@
 # src/scrcpy_manager.py
 
 import os
-import subprocess
-import time
-import shutil
-import logging
 import re
+import time
+import ctypes
+import logging
+import subprocess
+from src.device_detection import resolve_adb
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)
 
 # Process creation flags and prevent console window from appearing
 CREATE_NO_WINDOW = 0x08000000
-
-# Default UI scaling
-DEFAULT_UI_SCALING = 0.6
-
-# Top screen base resolution
-TOP_SCREEN_BASE_WIDTH = 1920
-TOP_SCREEN_BASE_HEIGHT = 1080
-
-# Resolution calculation factors for the bottom screen
-# These are device-specific ratios for the AYN Thor
-TOP_BOTTOM_SCALE_FACTOR = 5.23
-BOTTOM_WIDTH_SCALE_FACTOR = 2.95
-BOTTOM_HEIGHT_SCALE_FACTOR = 2.57
+# HIGH_PRIORITY_CLASS keeps scrcpy from being descheduled under load.
+# Important for sustained smoothness when the host CPU has other work.
+HIGH_PRIORITY_CLASS = 0x00000080
+SCRCPY_CREATION_FLAGS = CREATE_NO_WINDOW | HIGH_PRIORITY_CLASS
 
 # Scrcpy startup retry config
 SCRCPY_RETRY_COUNT = 2
@@ -49,31 +41,27 @@ SCRCPY_START_DELAY = 1.0
 
 # ADB command timeouts
 ADB_CAPTURE_OUTPUT = True
-ADB_SERVER_TIMEOUT = 10
+ADB_SERVER_TIMEOUT = 30
 ADB_TASKKILL_TIMEOUT = 5
 ADB_TCPIP_TIMEOUT = 10
 ADB_CONNECT_TIMEOUT = 10
+ADB_SERVER_START_RETRIES = 2
 
 # Logging constants
 LOG_MULT = 60
 LOGFILE_ENCODING = "utf-8"
 
 # Scrcpy default parameters
-DEFAULT_MAX_FPS = "120"
-DEFAULT_RENDER_DRIVER = "opengl"
+DEFAULT_MAX_FPS = "60"
+DEFAULT_RENDER_DRIVER = "direct3d"
+DEFAULT_VIDEO_CODEC = "h264"
 
 # Video bitrate calculation constants
-BITRATE_CALC_SCALE_FACTOR = 1.5
-TOP_BITRATE_MINIMUM = 8
-TOP_BITRATE_SCALE = 32
+BITRATE_CALC_SCALE_FACTOR = 2.0
+TOP_BITRATE_MINIMUM = 12
+TOP_BITRATE_SCALE = 24
 BOTTOM_BITRATE_MINIMUM = 6
-BOTTOM_BITRATE_SCALE = 24
-
-# AYN Thor Screen Constants
-TOP_SCREEN_DISPLAY_ID = "0"
-TOP_SCREEN_WINDOW_TITLE = "ThorCPY Top Screen"
-BOTTOM_SCREEN_DISPLAY_ID = "4"
-BOTTOM_SCREEN_WINDOW_TITLE = "ThorCPY Bottom Screen"
+BOTTOM_BITRATE_SCALE = 18
 
 # Timing delays for process management
 DISPLAY_INIT_DELAY = 1.2  # Wait for first display to initialize
@@ -87,7 +75,6 @@ SCRCPY_TERMINATE_TIMEOUT = 3
 # Wireless connection defaults
 DEFAULT_WIRELESS_PORT = 5555
 
-
 # Main ScrcpyManager class
 class ScrcpyManager:
     """
@@ -96,34 +83,38 @@ class ScrcpyManager:
     resolution and process management and shutdown
     """
 
-    def __init__(self, scale=DEFAULT_UI_SCALING, scrcpy_bin=None, adb_bin=None, enable_audio_top=True):
+    def __init__(self, profile, scale=None, scrcpy_bin=None,
+                 adb_bin=None, enable_audio_top=True, max_fps=int(DEFAULT_MAX_FPS)):
         """
         Initialize the scrcpy manager.
         """
-        logger.info(f"Initializing ScrcpyManager (scale={scale}, audio={enable_audio_top})")
-
-        self.scale = scale
+        self.scale = scale if scale is not None else profile.default_ui_scale
+        self.profile = profile
         self.processes = []
         self.serial = None
         self.enable_audio_top = enable_audio_top
         self.connection_mode = None
+        # Configurable per-instance FPS cap (override the module default)
+        self.max_fps = int(max_fps) if max_fps else int(DEFAULT_MAX_FPS)
+        self._scrcpy_log_handles = []
+
+        logger.info(
+            f"Initializing ScrcpyManager (scale={self.scale}, audio={enable_audio_top}, fps={max_fps})"
+        )
 
         # Calculate top screen resolution based on scale
-        base_w1 = TOP_SCREEN_BASE_WIDTH
-        base_h1 = TOP_SCREEN_BASE_HEIGHT
-        self.f_w1 = int(base_w1 * self.scale)
-        self.f_h1 = int(base_h1 * self.scale)
+        self.f_w1 = int(profile.top_screen_width * self.scale)
+        self.f_h1 = int(profile.top_screen_height * self.scale)
         logger.debug(f"Top window resolution: {self.f_w1}x{self.f_h1}")
 
         # Calculate bottom screen resolution based on scale
-        pxi = (base_w1 * self.scale) / TOP_BOTTOM_SCALE_FACTOR
-        self.f_w2 = int(BOTTOM_WIDTH_SCALE_FACTOR * pxi)
-        self.f_h2 = int(BOTTOM_HEIGHT_SCALE_FACTOR * pxi)
+        self.f_w2 = int(self.f_w1 * profile.get_screen_width_ratio())
+        self.f_h2 = int(self.f_w2 * profile.bottom_screen_height / profile.bottom_screen_width)
         logger.debug(f"Bottom window resolution: {self.f_w2}x{self.f_h2}")
 
         # Locate scrcpy and adb binaries
-        self.scrcpy_bin = scrcpy_bin or self._resolve_bin("scrcpy")
-        self.adb_bin = adb_bin or self._resolve_bin("adb")
+        self.scrcpy_bin = scrcpy_bin or resolve_adb("scrcpy")
+        self.adb_bin = adb_bin or resolve_adb("adb")
 
         if self.scrcpy_bin:
             logger.info(f"scrcpy binary found: {self.scrcpy_bin}")
@@ -140,118 +131,12 @@ class ScrcpyManager:
         self.scrcpy_start_delay = SCRCPY_START_DELAY
         logger.debug(f"Retry count: {self.scrcpy_retry_count}, Start delay: {self.scrcpy_start_delay}s")
 
-    def _resolve_bin(self, name):
-        """
-        Finds binary in local ./bin folder or system path.
-        """
-        logger.debug(f"Resolving binary: {name}")
-
-        # Check local bin folder first
-        local = os.path.join(os.getcwd(), "bin", f"{name}.exe")
-        if os.path.exists(local):
-            logger.info(f"Found {name} in local bin folder: {local}")
-            return local
-
-        # Fallback to system PATH
-        found = shutil.which(name)
-        if found:
-            logger.info(f"Found {name} in system PATH: {found}")
-            return found
-
-        logger.warning(f"Binary '{name}' not found in local bin or system PATH")
-        return None
-
     def _is_wireless_serial(self, serial):
         """
         Check if a serial number is a wireless connection (IP:PORT)
         """
         # Wireless connections are in format IP:PORT (e.g., 192.168.1.100:5555)
         return ':' in serial and re.match(r'\d+\.\d+\.\d+\.\d+:\d+', serial)
-
-    def detect_device(self):
-        """
-        Detect and return serial of first connected Android ADB device.
-
-        Starts ADB server if needed, then queries for authorized devices.
-        Ignores unauthorized devices to prevent connection issues.
-        Supports both USB and wireless connections.
-        """
-        logger.info("Starting ADB device detection")
-
-        if self.serial:
-            logger.info(f"Device already detected: {self.serial}")
-            return self.serial
-
-        if not self.adb_bin:
-            logger.error("Cannot detect device: ADB binary not found")
-            return None
-
-        # Start ADB server
-        try:
-            logger.debug("Starting ADB server")
-            result = subprocess.run(
-                [self.adb_bin, "start-server"],
-                capture_output=ADB_CAPTURE_OUTPUT,
-                text=True,
-                timeout=ADB_SERVER_TIMEOUT,
-            )
-            if result.returncode != 0:
-                logger.warning(f"ADB start-server returned code {result.returncode}")
-            else:
-                logger.debug("ADB server started successfully")
-        except subprocess.TimeoutExpired:
-            logger.error("ADB server start timeout")
-            return None
-        except Exception as AdbServerStartError:
-            logger.error(f"Failed to start ADB server: {AdbServerStartError}")
-            return None
-
-        # Get list of devices
-        try:
-            logger.debug("Running 'adb devices'")
-            result = subprocess.run(
-                [self.adb_bin, "devices"],
-                capture_output=ADB_CAPTURE_OUTPUT,
-                text=True,
-                timeout=ADB_SERVER_TIMEOUT,
-            )
-
-            if result.returncode != 0:
-                logger.error(f"'adb devices' failed with code {result.returncode}")
-                return None
-
-            # Parse output for authorized devices
-            lines = result.stdout.strip().split("\n")
-            logger.debug(f"ADB devices output: {lines}")
-
-            for line in lines[1:]:
-                parts = line.strip().split()
-                if len(parts) >= 2:
-                    serial, status = parts[0], parts[1]
-                    if status == "device":
-                        self.serial = serial
-                        # Determine connection mode
-                        if self._is_wireless_serial(serial):
-                            self.connection_mode = 'wireless'
-                            logger.info(f"Wireless device detected: {serial}")
-                        else:
-                            self.connection_mode = 'usb'
-                            logger.info(f"USB device detected: {serial}")
-                        return serial
-                    elif status == "unauthorized":
-                        logger.warning(f"Unauthorized device found: {serial} (please authorize on device)")
-                    else:
-                        logger.debug(f"Device with non-'device' status: {serial} ({status})")
-
-            logger.warning("No authorized devices found")
-            return None
-
-        except subprocess.TimeoutExpired:
-            logger.error("'adb devices' command timeout")
-            return None
-        except Exception as AdbDevicesError:
-            logger.error(f"Error during device detection: {AdbDevicesError}")
-            return None
 
     def connect_wireless(self, ip_address, port=DEFAULT_WIRELESS_PORT):
         """
@@ -309,9 +194,9 @@ class ScrcpyManager:
                     logger.warning("  4. Connect using IP:5555")
                     logger.warning("")
                     logger.warning("Make sure:")
-                    logger.warning("  • Device and PC are on the same WiFi network")
-                    logger.warning("  • Wireless debugging/ADB over network is enabled on device")
-                    logger.warning("  • No firewall is blocking the connection")
+                    logger.warning("  - Device and PC are on the same WiFi network")
+                    logger.warning("  - Wireless debugging/ADB over network is enabled on device")
+                    logger.warning("  - No firewall is blocking the connection")
                     logger.warning("=" * LOG_MULT)
 
                 return False
@@ -486,6 +371,62 @@ class ScrcpyManager:
             logger.error(f"Error getting device IP: {GetIPError}")
             return None
 
+    @staticmethod
+    def default_args(
+        width: int,
+        height: int,
+        bitrate_min: int,
+        bitrate_scale: int,
+        enable_audio: bool,
+    ) -> list[str]:
+        """
+        Returns the default editable scrcpy args for a single screen.
+        Called by profile dialogs to pre-populate the args textboxes.
+        """
+        pixels = width * height
+        bitrate_mbps = max(bitrate_min, int(pixels / 1e6 * bitrate_scale * BITRATE_CALC_SCALE_FACTOR))
+
+        codec_options = (
+            "low-latency=1,"
+            "priority=0,"
+            "operating-rate=120,"
+            "bitrate-mode=2,"
+            "complexity=0,"
+            "i-frame-interval=10,"
+            "intra-refresh-period=60"
+        )
+
+        args = [
+            f"--video-bit-rate={bitrate_mbps}M",
+            f"--render-driver={DEFAULT_RENDER_DRIVER}",
+            f"--video-codec={DEFAULT_VIDEO_CODEC}",
+            f"--video-codec-options={codec_options}",
+            "--no-mipmaps",
+            "--no-power-on",
+            "--no-cleanup",
+            "--print-fps",
+            "--audio-bit-rate=256K" if enable_audio else "--no-audio",
+        ]
+        return args
+
+    def _window_titles(self):
+        name = self.profile.name
+        return f"{name} - Top Screen - DualCPY", f"{name} - Bottom Screen - DualCPY"
+
+    def _read_last_log(self):
+        """Pull the last few lines from the most recent scrcpy log file."""
+        try:
+            if not self._scrcpy_log_handles:
+                return ""
+            handle = self._scrcpy_log_handles[-1]
+            handle.flush()
+            path = handle.name
+            with open(path, "r", errors="replace") as f:
+                lines = f.readlines()
+            return "".join(lines[-10:]).strip()
+        except Exception:
+            return ""
+
     def start_scrcpy(self, serial=None):
         """
         Start both scrcpy windows (top and bottom screen)
@@ -494,6 +435,10 @@ class ScrcpyManager:
         use_serial = serial or self.serial
         if not use_serial:
             raise RuntimeError("No device serial available")
+
+        profile = self.profile
+
+        top_title, bottom_title = self._window_titles()
 
         logger.info("=" * LOG_MULT)
         logger.info(f"Starting scrcpy for device: {use_serial}")
@@ -507,31 +452,51 @@ class ScrcpyManager:
 
         # Launch top screen
         logger.info("Starting top screen window")
+        top_args = profile.extra_scrcpy_args_top or self.default_args(
+            self.f_w1, self.f_h1, TOP_BITRATE_MINIMUM, TOP_BITRATE_SCALE,
+            enable_audio=self.enable_audio_top,
+        )
+        top_args = list(top_args) + ["--gamepad=uhid"]
         self._start_window(
             use_serial,
-            TOP_SCREEN_DISPLAY_ID,
-            TOP_SCREEN_WINDOW_TITLE,
+            profile.top_display_id,
+            top_title,
             self.f_w1,
             self.f_h1,
-            enable_audio=self.enable_audio_top,
-            bitrate_min=TOP_BITRATE_MINIMUM,
-            bitrate_scale=TOP_BITRATE_SCALE,
+            extra_args=top_args,
+            max_fps_override=self.max_fps,
         )
 
         # Wait for first display to stabilize
-        time.sleep(DISPLAY_INIT_DELAY)
+        logger.info("Waiting for top screen window to appear before starting bottom...")
+        deadline = time.time() + 15.0
+        while time.time() < deadline:
+            hwnd = ctypes.windll.user32.FindWindowW(None, top_title)
+            if hwnd:
+                logger.info(f"Top screen window confirmed (HWND: {hwnd}), starting bottom screen")
+                break
+            time.sleep(0.25)
+        else:
+            logger.warning("Top screen window not detected within 15s, starting bottom screen anyway")
+
+        logger.info(f"Waiting for server to stabilise...")
+        time.sleep(profile.screen_launch_delay)
+        logger.info("Server stabilisation delay finished.")
 
         # Launch bottom screen
         logger.info("Starting bottom screen window")
+        bottom_args = profile.extra_scrcpy_args_bottom or self.default_args(
+            self.f_w2, self.f_h2, BOTTOM_BITRATE_MINIMUM, BOTTOM_BITRATE_SCALE,
+            enable_audio=False,
+        )
+        bottom_args = list(bottom_args) + ["--gamepad=disabled"]
         self._start_window(
             use_serial,
-            BOTTOM_SCREEN_DISPLAY_ID,
-            BOTTOM_SCREEN_WINDOW_TITLE,
+            profile.bottom_display_id,
+            bottom_title,
             self.f_w2,
             self.f_h2,
-            enable_audio=False,
-            bitrate_min=BOTTOM_BITRATE_MINIMUM,
-            bitrate_scale=BOTTOM_BITRATE_SCALE,
+            extra_args=bottom_args,
         )
 
         logger.info("All scrcpy windows started successfully")
@@ -544,39 +509,27 @@ class ScrcpyManager:
             window_title,
             width,
             height,
-            enable_audio=False,
-            bitrate_min=8,
-            bitrate_scale=32,
+            extra_args: list = None,
+            max_fps_override=None,
     ):
         """
-        Start a single scrcpy window with retry logic
+        Start a single scrcpy window with retry logic.
+        extra_args are the fully editable per-screen scrcpy flags
+        (bitrate, codec, audio, etc.). Locked args (serial, display-id,
+        window-title, max-size, max-fps) are always applied separately.
         """
         label = f"'{window_title}'"
         logger.debug(f"Preparing to start {label} (display {display_id})")
 
-        # Calculate bitrate based on resolution
-        pixels = width * height
-        bitrate_mbps = max(bitrate_min, int(pixels / 1e6 * bitrate_scale * BITRATE_CALC_SCALE_FACTOR))
-        bitrate_str = f"{bitrate_mbps}M"
-        logger.debug(f"{label} bitrate: {bitrate_str}")
-
-        # Build command
         cmd = [
             self.scrcpy_bin,
-            "--serial", serial,
-            "--display-id", display_id,
+            "--serial",       serial,
+            "--display-id",   display_id,
             "--window-title", window_title,
-            "--max-size", f"{width}",
-            "--video-bit-rate", bitrate_str,
-            "--max-fps", DEFAULT_MAX_FPS,
-            "--render-driver", DEFAULT_RENDER_DRIVER,
+            "--max-size",     f"{width}",
+            "--max-fps",      str(max_fps_override if max_fps_override is not None else self.max_fps),
+            *(extra_args or []),
         ]
-
-        # Audio settings
-        if enable_audio:
-            cmd.append("--audio-bit-rate=256K")
-        else:
-            cmd.append("--no-audio")
 
         logger.debug(f"Command: {' '.join(cmd)}")
 
@@ -586,18 +539,75 @@ class ScrcpyManager:
             try:
                 logger.info(f"Starting {label} (attempt {attempt}/{self.scrcpy_retry_count})")
 
+                # IMPORTANT: NEVER use subprocess.PIPE here without a
+                # drain thread - scrcpy's stdout/stderr fill the OS
+                # pipe buffer (~64 KB on Windows) within seconds, then
+                # scrcpy blocks on its next write and the stream stalls.
+                #
+                # Instead we hand scrcpy a real file handle. The OS
+                # writes lazily to disk so there is no buffer-fill
+                # deadlock, and we get scrcpy's --print-fps output in
+                # a per-instance log file we can tail live with
+                # `Get-Content -Wait logs\scrcpy_<role>_*.log` to see
+                # the actual on-screen FPS.
+                role = "top" if "Top" in window_title else "bottom"
+                ts = time.strftime("%Y%m%d_%H%M%S")
+                log_dir = "logs"
+                try:
+                    os.makedirs(log_dir, exist_ok=True)
+                except Exception:
+                    pass
+                log_path = os.path.join(log_dir, f"scrcpy_{role}_{ts}.log")
+                try:
+                    log_handle = open(log_path, "wb", buffering=0)
+                    self._scrcpy_log_handles.append(log_handle)
+                    stdout_target = log_handle
+                    stderr_target = subprocess.STDOUT
+                    logger.info(f"Scrcpy {role} output -> {log_path}")
+                except Exception as ScrcpyLogOpenError:
+                    logger.warning(
+                        f"Could not open scrcpy log file '{log_path}': "
+                        f"{ScrcpyLogOpenError} - falling back to DEVNULL"
+                    )
+                    stdout_target = subprocess.DEVNULL
+                    stderr_target = subprocess.DEVNULL
+
+                # Disable SDL2's vsync wait inside scrcpy. With vsync
+                # ON, SDL_RenderPresent blocks until the next monitor
+                # refresh - on high-refresh-rate monitors (e.g. 144 /
+                # 165 / 240 Hz) the timing slots don't align with the
+                # 60 Hz incoming frame stream, and scrcpy ends up
+                # skipping frames. Setting SDL_RENDER_VSYNC=0 makes
+                # the renderer present every decoded frame as soon as
+                # it arrives - the small chance of tearing on a
+                # 200+ Hz panel is essentially invisible.
+                child_env = os.environ.copy()
+                child_env["SDL_RENDER_VSYNC"] = "0"
+                # Strip PyInstaller bootloader env vars so a frozen-
+                # parent's _MEIPASS isn't inherited by scrcpy.
+                for _k in (
+                    "_MEIPASS2",
+                    "_PYI_APPLICATION_HOME_DIR",
+                    "_PYI_PARENT_PROCESS_LEVEL",
+                    "_PYI_SPLASH_IPC",
+                ):
+                    child_env.pop(_k, None)
+
                 proc = subprocess.Popen(
                     cmd,
-                    creationflags=CREATE_NO_WINDOW,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    creationflags=SCRCPY_CREATION_FLAGS,
+                    stdout=stdout_target,
+                    stderr=stderr_target,
+                    env=child_env,
                 )
 
                 # Quick check if process survives startup
                 time.sleep(SCRCPY_CREATION_DELAY)
                 if proc.poll() is not None:
+                    log_tail = self._read_last_log()
                     raise RuntimeError(
                         f"Scrcpy {label} process died immediately (exit code: {proc.poll()})"
+                        + (f"\n\nScrcpy output:\n{log_tail}" if log_tail else "")
                     )
 
                 # Start process hidden
@@ -705,6 +715,14 @@ class ScrcpyManager:
         process_count = len(self.processes)
         self.processes = []
         logger.info(f"Cleared {process_count} process(es) from tracking list")
+
+        # Close any per-instance scrcpy log files we opened
+        for handle in self._scrcpy_log_handles:
+            try:
+                handle.close()
+            except Exception:
+                pass
+        self._scrcpy_log_handles = []
 
         # Device-side cleanup (scrcpy server and app_process)
         if self.serial and self.adb_bin:

@@ -1,3 +1,9 @@
-pygame>=2.6.0
-pyinstaller>=6.0.0
-pywin32-ctypes>=0.2.0
+customtkinter>=5.2.2
+darkdetect>=0.8.0
+dxcam>=0.3.0
+numpy>=2.4.0
+pillow>=12.0.0
+pywin32>=311
+requests>=2.34.0
+pyinstaller>=6.20.0
+opencv-python>=4.13.0
