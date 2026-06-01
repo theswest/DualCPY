@@ -150,7 +150,7 @@ class DeviceProfileEditorDialog:
             fg_color="transparent",
             scrollbar_button_color=BORDER_COLOUR,
         )
-        # Scroll isolation for the form scroll itself — only active while mouse is inside.
+        # Scroll isolation for the form scroll itself - only active while mouse is inside.
         def _fs_scroll(event):
             self._form_scroll._parent_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
             return "break"
@@ -446,12 +446,12 @@ class DeviceProfileEditorDialog:
         self._error_var.set("")
 
         self._top_info_var.set(
-            f"ID {profile.top_display_id}  ·  "
-            f"{profile.top_screen_width} × {profile.top_screen_height}"
+            f"ID {profile.top_display_id}  |  "
+            f"{profile.top_screen_width} x {profile.top_screen_height}"
         )
         self._bottom_info_var.set(
-            f"ID {profile.bottom_display_id}  ·  "
-            f"{profile.bottom_screen_width} × {profile.bottom_screen_height}"
+            f"ID {profile.bottom_display_id}  |  "
+            f"{profile.bottom_screen_width} x {profile.bottom_screen_height}"
         )
 
         display_name = (

@@ -194,9 +194,9 @@ class ScrcpyManager:
                     logger.warning("  4. Connect using IP:5555")
                     logger.warning("")
                     logger.warning("Make sure:")
-                    logger.warning("  • Device and PC are on the same WiFi network")
-                    logger.warning("  • Wireless debugging/ADB over network is enabled on device")
-                    logger.warning("  • No firewall is blocking the connection")
+                    logger.warning("  - Device and PC are on the same WiFi network")
+                    logger.warning("  - Wireless debugging/ADB over network is enabled on device")
+                    logger.warning("  - No firewall is blocking the connection")
                     logger.warning("=" * LOG_MULT)
 
                 return False

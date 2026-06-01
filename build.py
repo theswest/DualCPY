@@ -1,4 +1,4 @@
-# DualCPY – Dual-screen scrcpy docking and control UI for Windows
+# DualCPY - Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #
@@ -31,6 +31,8 @@ PyInstaller.__main__.run(
         "--add-data=logs;logs",
         "--add-data=assets/fonts;assets/fonts",
         "--add-data=assets/icon.png;assets",
+        "--add-data=assets/icon.ico;assets",
+        "--add-data=assets/icons;assets/icons",
         "--icon=assets/icon.ico",
         "-y",
     ]

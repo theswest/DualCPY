@@ -31,6 +31,7 @@ from io import BytesIO
 from ctypes import windll, wintypes
 
 from src.win32_darkmode import enable_dark_titlebar
+from src.file_transfer_dialog import FileTransferDialog
 from src.ui_constants import (
     BG_COLOUR, PANEL_COLOUR, BORDER_COLOUR, TEXT_COLOUR,
     ACCENT_COLOUR, ACCENT2_COLOUR, TOP_COLOUR, BOTTOM_COLOUR,
@@ -85,8 +86,8 @@ def show_loading_screen():
     splash.iconbitmap()
     splash.title("DualCPY Loading...")
 
-    window_width = 400
-    window_height = 180
+    window_width = 480
+    window_height = 190
     screen_width = splash.winfo_screenwidth()
     screen_height = splash.winfo_screenheight()
     center_x = (screen_width - window_width) // 2
@@ -99,8 +100,24 @@ def show_loading_screen():
 
     apply_window_icon(splash)
 
-    title_frame = ctk.CTkFrame(splash, fg_color="transparent")
-    title_frame.pack(pady=(32, 4))
+    # Horizontal layout: DualCPY logo on the left, text block to its right.
+    content = ctk.CTkFrame(splash, fg_color="transparent")
+    content.pack(expand=True, padx=28)
+
+    try:
+        logo_ctk = ctk.CTkImage(Image.open(ICON_PATH), size=(96, 96))
+        logo_lbl = ctk.CTkLabel(content, image=logo_ctk, text="")
+        logo_lbl._logo_ref = logo_ctk  # keep a reference so it isn't GC'd
+        logo_lbl.pack(side="left", padx=(0, 22))
+    except Exception as e:
+        logger.warning(f"Splash logo failed to load: {e}")
+
+    # Text block sits to the right of the logo, left-aligned within itself.
+    text_block = ctk.CTkFrame(content, fg_color="transparent")
+    text_block.pack(side="left")
+
+    title_frame = ctk.CTkFrame(text_block, fg_color="transparent")
+    title_frame.pack(anchor="w")
 
     ctk.CTkLabel(
         title_frame,
@@ -117,11 +134,11 @@ def show_loading_screen():
     ).pack(side="left")
 
     ctk.CTkLabel(
-        splash,
-        text="Starting up…",
-        font=make_font(30),
+        text_block,
+        text="Starting up...",
+        font=make_font(22),
         text_color=TEXT_COLOUR,
-    ).pack()
+    ).pack(anchor="w")
 
     def _after_idle():
         try:
@@ -319,7 +336,10 @@ class CTkUI:
         self._section("Window Config")
 
         btn_grid = ctk.CTkFrame(self._scroll, fg_color="transparent")
-        btn_grid.pack(fill="x", padx=16, pady=4)
+        # No bottom frame-padding: bottom_btn_row sits flush below so the gap to
+        # it matches the 8px gap between rows inside this grid (otherwise the
+        # two frames' pady stack and double it).
+        btn_grid.pack(fill="x", padx=16, pady=(4, 0))
         btn_grid.columnconfigure(0, weight=1)
         btn_grid.columnconfigure(1, weight=1)
 
@@ -387,6 +407,7 @@ class CTkUI:
 
         # Wireless + Edit Device Profiles row
         bottom_btn_row = ctk.CTkFrame(self._scroll, fg_color="transparent")
+        # Flush against btn_grid above (see note there); keep bottom padding.
         bottom_btn_row.pack(fill="x", padx=16, pady=(0, 4))
         bottom_btn_row.columnconfigure(0, weight=1)
         bottom_btn_row.columnconfigure(1, weight=1)
@@ -401,7 +422,7 @@ class CTkUI:
             border_width=1,
             text_color=TEXT_COLOUR,
             font=make_font(13),
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4), pady=4)
 
         ctk.CTkButton(
             bottom_btn_row,
@@ -413,7 +434,20 @@ class CTkUI:
             border_width=1,
             text_color=TEXT_COLOUR,
             font=make_font(13),
-        ).grid(row=0, column=1, sticky="ew", padx=(4, 0))
+        ).grid(row=0, column=1, sticky="ew", padx=(4, 0), pady=4)
+
+        # File Transfer button (full width, row 1)
+        ctk.CTkButton(
+            bottom_btn_row,
+            text="File Transfer",
+            command=self._on_file_transfer,
+            fg_color=PANEL_COLOUR,
+            hover_color=BORDER_COLOUR,
+            border_color=BORDER_COLOUR,
+            border_width=1,
+            text_color=TEXT_COLOUR,
+            font=make_font(13),
+        ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=4)
 
         # Determine the display name of the initial loaded profile
         current_prof = self.l.scrcpy.profile
@@ -452,7 +486,7 @@ class CTkUI:
         ctk.CTkEntry(
             save_row,
             textvariable=self._preset_name_var,
-            placeholder_text="Preset name…",
+            placeholder_text="Preset name...",
             fg_color=PANEL_COLOUR,
             border_color=BORDER_COLOUR,
             text_color=TEXT_COLOUR,
@@ -660,7 +694,7 @@ class CTkUI:
             self._scale_changed = False
             self._original_scale = self.l.global_scale
             self._scale_notice.configure(text="")
-            self.show_status("Restarting…", "info")
+            self.show_status("Restarting...", "info")
             self.l.restart_app()
 
     def _on_dock_toggle(self):
@@ -695,6 +729,26 @@ class CTkUI:
         finally:
             self.window.deiconify()
             self.window.lift()
+
+    def _on_file_transfer(self):
+        """Open the dual-pane file transfer dialog."""
+        adb_bin = getattr(self.l.scrcpy, "adb_bin", None)
+        serial = getattr(self.l.scrcpy, "serial", None)
+
+        if not adb_bin or not serial:
+            self.show_status("No device connected for file transfer", "error")
+            return
+
+        try:
+            dlg = FileTransferDialog(
+                parent=self.window,
+                adb_bin=adb_bin,
+                serial=serial,
+            )
+            dlg.show()
+        except Exception as e:
+            logger.error(f"Failed to open File Transfer dialog: {e}", exc_info=True)
+            self.show_status("Could not open File Transfer", "error")
 
     def _on_save_preset(self):
         name = self._preset_name_var.get().strip()

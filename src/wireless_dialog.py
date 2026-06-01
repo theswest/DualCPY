@@ -1,4 +1,4 @@
-# DualCPY – Dual-screen scrcpy docking and control UI for Windows
+# DualCPY - Dual-screen scrcpy docking and control UI for Windows
 # Copyright (C) 2026 the_swest
 # Contact: Github issues
 #
@@ -141,7 +141,7 @@ class WirelessConnectionDialog:
 
         self.status_label = ctk.CTkLabel(
             scroll,
-            text="Checking…",
+            text="Checking...",
             font=make_font(12),
             text_color=TEXT_COLOUR,
             anchor="w",
@@ -158,7 +158,7 @@ class WirelessConnectionDialog:
             scroll,
             text=(
                 "If you've already paired your device, enter the IP and port shown in:\n"
-                "Settings → Developer Options → Wireless Debugging"
+                "Settings -> Developer Options -> Wireless Debugging"
             ),
             font=make_font(12),
             text_color=BORDER_COLOUR,
@@ -201,7 +201,7 @@ class WirelessConnectionDialog:
             scroll,
             text=(
                 "Follow these steps on your AYN Thor:\n\n"
-                "1. Go to: Settings → System → Developer Options → Wireless Debugging\n"
+                "1. Go to: Settings -> System -> Developer Options -> Wireless Debugging\n"
                 "2. Tap on 'Pair device with pairing code'\n"
                 "3. Enter the IP Address, Port, and 6-digit code shown below"
             ),
@@ -419,7 +419,7 @@ class WirelessConnectionDialog:
                 "Invalid IP Address",
                 "Please enter a valid IP address.\n\n"
                 "Example: 192.168.1.100\n\n"
-                "Find this in: Settings → Developer Options → Wireless Debugging",
+                "Find this in: Settings -> Developer Options -> Wireless Debugging",
             )
             return
 
@@ -437,7 +437,7 @@ class WirelessConnectionDialog:
 
         logger.info(f"Attempting wireless connection to {ip}:{port}")
 
-        self.connect_btn.configure(state="disabled", text="Connecting…")
+        self.connect_btn.configure(state="disabled", text="Connecting...")
         self.dialog.update()
 
         try:
@@ -457,11 +457,11 @@ class WirelessConnectionDialog:
                     "Connection Failed",
                     f"Could not connect to {ip}:{port}\n\n"
                     "Please check the following:\n\n"
-                    "• Your device is powered on\n"
-                    "• Both devices are on the same Wi-Fi network\n"
-                    "• Wireless debugging is enabled on your Thor\n"
-                    "• The IP address and port are correct\n"
-                    "• You've successfully paired the device first (if first time)",
+                    "- Your device is powered on\n"
+                    "- Both devices are on the same Wi-Fi network\n"
+                    "- Wireless debugging is enabled on your Thor\n"
+                    "- The IP address and port are correct\n"
+                    "- You've successfully paired the device first (if first time)",
                 )
         finally:
             self.connect_btn.configure(state="normal", text="Connect Now")
@@ -497,7 +497,7 @@ class WirelessConnectionDialog:
                 "Invalid Pairing Code",
                 "Please enter the 6-digit pairing code exactly as shown on your device.\n\n"
                 "Find this in:\n"
-                "Settings → Developer Options → Wireless Debugging → Pair device with pairing code\n\n"
+                "Settings -> Developer Options -> Wireless Debugging -> Pair device with pairing code\n\n"
                 "Note: The code expires after a short time. Generate a new one if needed.",
             )
             return
@@ -505,7 +505,7 @@ class WirelessConnectionDialog:
         address = f"{ip}:{port_str}"
         logger.info(f"Attempting to pair with {address}")
 
-        self.pair_btn.configure(state="disabled", text="Pairing…")
+        self.pair_btn.configure(state="disabled", text="Pairing...")
         self.dialog.update()
 
         try:
@@ -526,11 +526,11 @@ class WirelessConnectionDialog:
                     "Pairing Failed",
                     f"Could not pair with {address}\n\n"
                     "Please check the following:\n\n"
-                    "• Your device is powered on\n"
-                    "• Both devices are on the same Wi-Fi network\n"
-                    "• Wireless debugging is enabled\n"
-                    "• The IP, port, and pairing code are entered correctly\n"
-                    "• The pairing code hasn't expired\n\n"
+                    "- Your device is powered on\n"
+                    "- Both devices are on the same Wi-Fi network\n"
+                    "- Wireless debugging is enabled\n"
+                    "- The IP, port, and pairing code are entered correctly\n"
+                    "- The pairing code hasn't expired\n\n"
                     "Tip: Try generating a new pairing code on your device.",
                 )
         finally:

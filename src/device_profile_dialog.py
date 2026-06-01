@@ -136,9 +136,9 @@ class DeviceProfileDialog:
     def _refresh_display_vars(self):
         top, bottom = self._get_top_bottom()
         self._top_id_var.set(f"Display ID: {top['id']}")
-        self._top_res_var.set(f"{top['width']} × {top['height']}")
+        self._top_res_var.set(f"{top['width']} x {top['height']}")
         self._bottom_id_var.set(f"Display ID: {bottom['id']}")
-        self._bottom_res_var.set(f"{bottom['width']} × {bottom['height']}")
+        self._bottom_res_var.set(f"{bottom['width']} x {bottom['height']}")
 
     # UI construction
     def _build(self):
