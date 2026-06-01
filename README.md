@@ -14,7 +14,7 @@ It launches two scrcpy windows (one for each display) and embeds them into a nat
 
 **DualCPY is primarily designed for Windows 11. It will work on Windows 10, however bugs may occur!**
 
-**For Linux users, please use the Linux port: https://github.com/DrSkyfaR/ThorCPY-Linux**
+**For Linux users, please use the Linux port: https://github.com/DrSkyfaR/DualCPY-Linux**
 
 Please report any issues at https://github.com/theswest/DualCPY/issues
 
