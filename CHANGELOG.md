@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 - 01-06-2026
+## 1.0.0 - 01-06-2026
 
 > Note: **ThorCPY is now known as DualCPY.**
 
