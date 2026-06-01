@@ -459,7 +459,7 @@ class Launcher:
                 icon_candidates = [resource_path("assets/icon.ico")]
             else:
                 # Dev: try cwd, the project root (one level above src/), and the
-                # directory containing this file — covers all PyCharm run configs
+                # directory containing this file - covers all PyCharm run configs
                 _this_dir    = os.path.dirname(os.path.abspath(__file__))
                 _project_root = os.path.dirname(_this_dir)
                 icon_candidates = [
@@ -494,7 +494,7 @@ class Launcher:
                         hicon = large_icons[0]
                         logger.debug("Container icon extracted from exe resources")
                     else:
-                        logger.warning("ExtractIconExW returned 0 — container will have blank icon")
+                        logger.warning("ExtractIconExW returned 0 - container will have blank icon")
                 except Exception as e:
                     logger.warning(f"ExtractIconExW failed: {e}")
 

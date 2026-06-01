@@ -909,10 +909,10 @@ class CTkUI:
         """
         try:
             if not self.l.docked:
-                logger.debug("Skipping force sync – not docked")
+                logger.debug("Skipping force sync - not docked")
                 return
             if not (self.l.dock.hwnd_top and self.l.dock.hwnd_bottom):
-                logger.warning("Cannot force sync – window handles not available")
+                logger.warning("Cannot force sync - window handles not available")
                 return
 
             self.l.dock._last_sync = 0
