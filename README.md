@@ -302,3 +302,13 @@ Buy me a coffee: https://ko-fi.com/theswest
 - **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)** - modern UI toolkit
 - **Microsoft** - Windows API documentation
 - All other contributors and testers, especially dd, splain, and everyone else who helped!
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=theswest%2FDualCPY&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=theswest/DualCPY&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=theswest/DualCPY&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=theswest/DualCPY&type=date&legend=top-left" />
+ </picture>
+</a>
