@@ -39,6 +39,8 @@ Please report any issues at https://github.com/theswest/DualCPY/issues
   </tr>
 </table>
 
+<p align="center"><sub>Screenshots feature <a href="https://iisu.network/"><b>iiSU</b></a></sub></p>
+
 ## What's New in 1.0.0
 
 - Rebranded from ThorCPY to DualCPY, with a brand-new logo and splash screen
@@ -55,7 +57,7 @@ See the full [CHANGELOG](CHANGELOG.md) for details.
 
 ## Features
 
-- Multi-device support with built-in profiles for many dual-screen handhelds (AYN Thor, RG DS, Pocket DS, Retroid/AYN Odin + RDS, Retroid Pocket + RDS, and more), plus custom user-defined profiles
+- Multi-device support with built-in profiles for many dual-screen handhelds (AYN Thor, RG DS, Pocket DS, OneXSugar Sugar 1, Retroid/AYN Odin + RDS, Retroid Pocket + RDS, and more), plus custom user-defined profiles
 - Automatic device detection over ADB, with a device selector on launch and smart selection of the connected device
 - "Last used profile" is remembered per-device and auto-booted on launch
 - Both wired (USB) and wireless connection
