@@ -16,6 +16,8 @@ It launches two scrcpy windows (one for each display) and embeds them into a nat
 
 **For Linux users, please use the Linux port: https://forgejo.skyfar.de/SkyfaR/DualCPY-Linux**
 
+**For MacOS users, please use the MacOS port: https://github.com/sofianeelhor/DualCPY-macOS**
+
 Please report any issues at https://github.com/theswest/DualCPY/issues
 
 <h2 align="center">Screenshots</h2>
